@@ -1,0 +1,222 @@
+<!-- templates\dashboard.html, do not remove this line-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Household Task Tracker - Dashboard</title>
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+  />
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      background-color: #f8f9fa;
+    }
+    .nav-btns .btn {
+      margin-right: 0.5rem;
+      font-size: 1.1rem;
+      padding: 1rem 1.5rem;
+    }
+    .card-header {
+      background-color: #0d6efd;
+      color: #fff;
+      font-weight: bold;
+      font-size: 1.2rem;
+    }
+    .card {
+      border: none;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    .calendar-table th {
+      background-color: #e2e6ea;
+    }
+    .big-button {
+      font-size: 1.1rem;
+      padding: 1rem 1.5rem;
+    }
+  </style>
+</head>
+<body class="container py-3">
+  
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">Welcome, {{ username }}</h2>
+    <div class="nav-btns">
+      <a href="{{ url_for('stats') }}" class="btn btn-info big-button">View Stats</a>
+      <a href="{{ url_for('logout') }}" class="btn btn-secondary big-button">Logout</a>
+    </div>
+  </div>
+
+  <!-- Form to create new task -->
+  <div class="card mb-4">
+    <div class="card-header">Create a New Task</div>
+    <div class="card-body">
+      <form action="{{ url_for('create_task') }}" method="POST" class="row g-3">
+        <div class="col-md-3">
+          <label for="title" class="form-label">Task</label>
+          <select name="title" id="title" class="form-select form-select-lg">
+            <option value="Wäsche">Wäsche</option>
+            <option value="Küche">Küche</option>
+            <option value="kochen">kochen</option>
+            <!-- Optionally add more tasks -->
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label for="duration" class="form-label">Duration (hours)</label>
+          <select name="duration" id="duration" class="form-select form-select-lg">
+            <option value="12">12</option>
+            <option value="24">24</option>
+            <option value="48" selected>48</option>
+            <option value="72">72</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label for="assigned_to" class="form-label">Assign To</label>
+          <select name="assigned_to" id="assigned_to" class="form-select form-select-lg">
+            <option value="">Nobody</option>
+            <option value="Wiesel">Wiesel</option>
+            <option value="Otter">Otter</option>
+          </select>
+        </div>
+        <div class="col-md-3 d-flex align-items-end">
+          <button type="submit" class="btn btn-primary w-100 big-button">Save Task</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- CALENDAR VIEW -->
+  <!-- Example: Display the next 7 days (or however many you pass) with tasks due on each day -->
+  <div class="card mb-4">
+    <div class="card-header">Calendar View (Weekly Overview)</div>
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-bordered calendar-table text-center">
+          <thead>
+            <tr>
+              <th style="width: 15%">Day</th>
+              <th style="width: 15%">Date</th>
+              <th style="width: 70%">Tasks</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for day in calendar_days %}
+            <tr>
+              <td>{{ day.strftime('%A') }}</td>
+              <td>{{ day.strftime('%d.%m.%Y') }}</td>
+              <td>
+                {% set day_date = day.date() %}
+                <ul class="list-group">
+                  {% for t in open_tasks %}
+                    {% if t.due_date %}
+                      {% set due_dt = t.due_date|datetime|attr('date') %}
+                      {# 'due_date|datetime' calls a custom filter or we can do 'datetime.fromisoformat(...)' in the python code. #}
+                      {% if due_dt == day_date %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                          {{ t.title }} 
+                          <span class="fw-bold">({{ t.assigned_to or 'No one' }})</span>
+                        </li>
+                      {% endif %}
+                    {% endif %}
+                  {% endfor %}
+                </ul>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Show open tasks -->
+  <div class="card mb-4">
+    <div class="card-header">Open Tasks</div>
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Task</th>
+              <th>Assigned To</th>
+              <th>Time Created</th>
+              <th>Due Date</th>
+              <th>Finish</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for task in open_tasks %}
+            <tr>
+              <td>{{ task.title }}</td>
+              <td>{{ task.assigned_to if task.assigned_to else "No one" }}</td>
+              <td>{{ task.creation_date|human_date }}</td>
+              <td>{{ task.due_date|human_date }}</td>
+              <td>
+                <!-- All users can see the finish button. Modify logic if needed. -->
+                <form action="{{ url_for('finish_task', task_id=task.id) }}" method="POST">
+                  <button class="btn btn-success big-button">Finish</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Show completed tasks -->
+  <div class="card mb-5">
+    <div class="card-header">Completed Tasks</div>
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-success align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>Task</th>
+              <th>Assigned To</th>
+              <th>Completed By</th>
+              <th>Time Created</th>
+              <th>Completion Date</th>
+              <th>Time Taken</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for task in completed_tasks %}
+            <tr>
+              <td>{{ task.title }}</td>
+              <td>{{ task.assigned_to if task.assigned_to else "No one" }}</td>
+              <td>{{ task.completed_by }}</td>
+              <td>{{ task.creation_date|human_date }}</td>
+              <td>{{ task.completed_on|human_date }}</td>
+              <td>{{ task.creation_date|time_taken(task.completed_on) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  <script>
+    // Register service worker for PWA (in case user navigates directly here)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register("{{ url_for('static', filename='js/service-worker.js') }}")
+      .then(reg => console.log("Service Worker registered on dashboard!", reg))
+      .catch(err => console.error("Service Worker registration failed:", err));
+    }
+
+    // Example: Check if user can get notifications
+    if ('Notification' in window) {
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          // We can show notifications or subscribe to push
+        }
+      });
+    }
+  </script>
+</body>
+</html>
