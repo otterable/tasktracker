@@ -17,11 +17,12 @@ def get_db_connection():
     return conn
 
 # -- JINJA FILTERS --
+
 @app.template_filter("human_date")
 def human_date(value):
     """
     Converts an ISO datetime string (e.g. '2025-01-29T17:57:21.818417') 
-    to 'dd.mm.yyyy, HH:MM'.
+    to 'dd.mm.%Y, HH:MM'.
     """
     if not value:
         return ""
@@ -53,6 +54,15 @@ def time_taken(created_str, completed_str):
         parts.append(f"{minutes}m")
 
     return " ".join(parts) if parts else "0m"
+
+@app.template_filter("to_datetime")
+def to_datetime_filter(value):
+    """
+    Converts a string in ISO format to a Python datetime object.
+    """
+    if not value:
+        return None
+    return datetime.fromisoformat(value)
 
 # Initialize the database if necessary
 def init_db():

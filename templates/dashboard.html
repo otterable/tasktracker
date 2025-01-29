@@ -111,9 +111,9 @@
                 <ul class="list-group">
                   {% for t in open_tasks %}
                     {% if t.due_date %}
-                      {% set due_dt = t.due_date|datetime|attr('date') %}
-                      {# 'due_date|datetime' calls a custom filter or we can do 'datetime.fromisoformat(...)' in the python code. #}
-                      {% if due_dt == day_date %}
+                      {# Convert the string to a datetime object using the 'to_datetime' filter. #}
+                      {% set due_dt = t.due_date|to_datetime %}
+                      {% if due_dt and due_dt.date() == day_date %}
                         <li class="list-group-item d-flex justify-content-between align-items-center">
                           {{ t.title }} 
                           <span class="fw-bold">({{ t.assigned_to or 'No one' }})</span>
