@@ -10,31 +10,47 @@ import 'package:flutter_tasktracker/models/stats_response.dart';
 class ApiService {
   static const String baseUrl = "http://localhost:5444";
 
-  // POST /api/login
-  // ADD phone parameter so we can send phone number to the server
-  static Future<bool> login(String username, String password, String phone) async {
-    debugPrint("[ApiService] POST /api/login => $username:$password, phone=$phone");
+  /// -----------------------
+  ///  PHONE-based OTP login
+  /// -----------------------
+  static Future<bool> requestOtp(String phone) async {
+    debugPrint("[ApiService] POST /api/request_otp => phone=$phone");
     final response = await http.post(
-      Uri.parse("$baseUrl/api/login"),
+      Uri.parse("$baseUrl/api/request_otp"),
       headers: {"Content-Type": "application/json"},
-      body: json.encode({
-        "username": username,
-        "password": password,
-        "phone": phone, // <-- send phone here
-      }),
+      body: json.encode({"phone": phone}),
     );
     debugPrint("[ApiService] Response code: ${response.statusCode}");
     if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      debugPrint("[ApiService] Login success => $data");
+      debugPrint("[ApiService] OTP requested successfully");
       return true;
     } else {
-      debugPrint("[ApiService] Login failed => ${response.body}");
+      debugPrint("[ApiService] requestOtp failed => ${response.body}");
       return false;
     }
   }
 
-  // GET /api/tasks => returns all tasks
+  static Future<String?> verifyOtp(String phone, String otpCode) async {
+    debugPrint("[ApiService] POST /api/verify_otp => phone=$phone, code=$otpCode");
+    final response = await http.post(
+      Uri.parse("$baseUrl/api/verify_otp"),
+      headers: {"Content-Type": "application/json"},
+      body: json.encode({"phone": phone, "otp_code": otpCode}),
+    );
+    debugPrint("[ApiService] Response code: ${response.statusCode}");
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      debugPrint("[ApiService] OTP verify success => $data");
+      return data["username"] as String?;
+    } else {
+      debugPrint("[ApiService] verifyOtp failed => ${response.body}");
+      return null;
+    }
+  }
+
+  /// -----------------------
+  ///  Tasks Endpoints
+  /// -----------------------
   static Future<List<Task>> getAllTasks() async {
     debugPrint("[ApiService] GET /api/tasks...");
     final response = await http.get(Uri.parse("$baseUrl/api/tasks"));
@@ -48,7 +64,6 @@ class ApiService {
     }
   }
 
-  // POST /api/tasks => create new task
   static Future<Task> createTask(String title, int durationHours, String? assignedTo) async {
     debugPrint("[ApiService] POST /api/tasks => $title $durationHours $assignedTo");
     final bodyData = {
@@ -70,7 +85,6 @@ class ApiService {
     }
   }
 
-  // POST /api/tasks/<id>/finish => finish a task
   static Future<Task> finishTask(int id, String finisher) async {
     debugPrint("[ApiService] POST /api/tasks/$id/finish => $finisher");
     final response = await http.post(
@@ -87,7 +101,6 @@ class ApiService {
     }
   }
 
-  // GET /api/stats => StatsResponse (completions, all_tasks)
   static Future<StatsResponse> getStats() async {
     debugPrint("[ApiService] GET /api/stats...");
     final response = await http.get(Uri.parse("$baseUrl/api/stats"));
@@ -100,7 +113,6 @@ class ApiService {
     }
   }
 
-  // GET /api/heartbeat => { "status": "ok" }
   static Future<bool> getHeartbeat() async {
     final url = Uri.parse("$baseUrl/api/heartbeat");
     debugPrint("[ApiService] GET /api/heartbeat => $url");
@@ -115,4 +127,21 @@ class ApiService {
   // CSV / XLSX
   static String getCsvExportUrl() => "$baseUrl/export_csv";
   static String getXlsxExportUrl() => "$baseUrl/export_xlsx";
+
+  /// -----------------------
+  ///  Push Notifications
+  /// -----------------------
+  /// Flutter side: store the device token from Firebase Cloud Messaging
+  /// on the server so it can send push notifications even if app is closed
+  static Future<void> sendDeviceTokenToServer(String token, String username) async {
+    debugPrint("[ApiService] sendDeviceTokenToServer => token=$token, user=$username");
+    final bodyData = {"token": token, "username": username};
+    final response = await http.post(
+      Uri.parse("$baseUrl/api/register_token"),
+      headers: {"Content-Type": "application/json"},
+      body: json.encode(bodyData),
+    );
+    debugPrint("[ApiService] register_token => code ${response.statusCode}");
+    // no special return needed
+  }
 }

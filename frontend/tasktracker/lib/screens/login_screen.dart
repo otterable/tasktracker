@@ -13,74 +13,127 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _usernameController = TextEditingController();
-  final _passwordController = TextEditingController();
-  // ADD a phone number controller
   final _phoneController = TextEditingController();
+  final _otpController = TextEditingController();
 
+  bool _otpRequested = false;
   String? _errorMessage;
+
+  Future<void> _requestOtp() async {
+    setState(() {
+      _errorMessage = null;
+    });
+    final phone = _phoneController.text.trim();
+    if (phone.isEmpty) {
+      setState(() => _errorMessage = "Bitte Telefonnummer eingeben.");
+      return;
+    }
+    final success = await ApiService.requestOtp(phone);
+    if (success) {
+      setState(() {
+        _otpRequested = true;
+      });
+    } else {
+      setState(() => _errorMessage = "Fehler beim Anfordern des Codes. Prüfe Telefonnummer oder Server.");
+    }
+  }
+
+  Future<void> _verifyOtp() async {
+    setState(() {
+      _errorMessage = null;
+    });
+    final phone = _phoneController.text.trim();
+    final code = _otpController.text.trim();
+    if (phone.isEmpty || code.isEmpty) {
+      setState(() => _errorMessage = "Bitte sowohl Telefonnummer als auch Code eingeben.");
+      return;
+    }
+    final username = await ApiService.verifyOtp(phone, code);
+    if (username != null) {
+      widget.onLoginSuccess(username);
+    } else {
+      setState(() => _errorMessage = "Code oder Telefonnummer ungültig.");
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Keep your app bar if you wish
       appBar: AppBar(
-        title: const Text("Log In"),
+        title: const Text("Molentracker"),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            if (_errorMessage != null)
-              Text(
-                _errorMessage!,
-                style: const TextStyle(color: Colors.red),
+      body: Container(
+        // 1) Full background image
+        decoration: const BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage("assets/molen.png"),
+            fit: BoxFit.cover, // fill the screen while cropping
+          ),
+        ),
+        child: Center(
+          // 2) A scrollable center layout for smaller screens
+          child: SingleChildScrollView(
+            // 3) A white “card” with padding
+            child: Container(
+              width: 300, // you can adjust to your taste
+              padding: const EdgeInsets.all(16.0),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(8),
               ),
-            TextField(
-              controller: _usernameController,
-              decoration: const InputDecoration(
-                labelText: "Username",
+              child: Column(
+                children: [
+                  if (_errorMessage != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8.0),
+                      child: Text(
+                        _errorMessage!,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+
+                  // 4) German labels, bold & black
+                  TextField(
+                    controller: _phoneController,
+                    decoration: const InputDecoration(
+                      labelText: "Handynummer",
+                      labelStyle: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  if (!_otpRequested) ...[
+                    ElevatedButton(
+                      onPressed: _requestOtp,
+                      child: const Text("OTP anfordern"),
+                    ),
+                  ] else ...[
+                    TextField(
+                      controller: _otpController,
+                      decoration: const InputDecoration(
+                        labelText: "Bestätigungs-Code",
+                        labelStyle: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: _verifyOtp,
+                      child: const Text("Code prüfen"),
+                    ),
+                  ],
+                ],
               ),
             ),
-            TextField(
-              controller: _passwordController,
-              decoration: const InputDecoration(
-                labelText: "Password",
-              ),
-              obscureText: true,
-            ),
-            // NEW: A phone number field
-            TextField(
-              controller: _phoneController,
-              decoration: const InputDecoration(
-                labelText: "Phone Number (e.g. +1987654321)",
-              ),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton(
-              child: const Text("Login"),
-              onPressed: _attemptLogin,
-            ),
-          ],
+          ),
         ),
       ),
     );
-  }
-
-  void _attemptLogin() async {
-    final username = _usernameController.text.trim();
-    final password = _passwordController.text.trim();
-    final phone = _phoneController.text.trim();
-
-    if (username.isEmpty || password.isEmpty || phone.isEmpty) {
-      setState(() => _errorMessage = "Please fill in all fields (including phone)");
-      return;
-    }
-
-    bool success = await ApiService.login(username, password, phone);
-    if (success) {
-      widget.onLoginSuccess(username);
-    } else {
-      setState(() => _errorMessage = "Invalid credentials");
-    }
   }
 }

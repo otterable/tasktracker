@@ -1,5 +1,3 @@
-# app.py, do not remove this line
-
 from flask import (
     Flask,
     render_template,
@@ -13,72 +11,81 @@ from flask import (
 import sqlite3
 import csv
 import io
+import re
+import random
 from datetime import datetime, timedelta
+import requests  # for sending requests to FCM
 
 # 1) Import and enable CORS
 from flask_cors import CORS
 
-# NEW: Import Twilio client
+# 2) Import Twilio client
 from twilio.rest import Client
 
 app = Flask(__name__)
-app.secret_key = "yoursecretkey"  # Replace with a strong secret key
+app.secret_key = "my-very-strong-secret-key"  # Change to something secure
 
-# Enable CORS for all routes:
+# Enable CORS for all routes
 CORS(app)
 
 DATABASE = 'database.db'
 
-#################### TWILIO CONFIGURATION ####################
-# Replace these with your actual Twilio credentials / phone
-TWILIO_ACCOUNT_SID = "YOUR_TWILIO_ACCOUNT_SID"
-TWILIO_AUTH_TOKEN = "YOUR_TWILIO_AUTH_TOKEN"
-TWILIO_FROM_NUMBER = "+1234567890"  # Your Twilio phone number
-# Example phone numbers for each user (for demonstration)
-USER_PHONE_NUMBERS = {
-    "weasel": "+1987654321",
-    "Otter": "+1987000111",
-    # Add more if needed
+######################### TWILIO CONFIGURATION #########################
+TWILIO_ACCOUNT_SID = "ACc21e0ab649ebe0280c1cab26ebdb92be"
+TWILIO_AUTH_TOKEN = "4799cd1a4a179d21f1fc1083aab66736"
+TWILIO_FROM_NUMBER = "+14243294447"  # Your Twilio phone number
+
+# The phone->username mapping you want (leading '+' is recommended).
+# We'll store them in normalized form, but we handle user input with spaces, etc.
+PHONE_TO_USERNAME = {
+    "+436703596614": "otter",
+    "+4369910503659": "weasel"
 }
+#######################################################################
 
-def send_sms_on_login(username):
+# We keep a dictionary in memory for OTP codes currently requested
+# key = normalized_phone, value = {"code": <6-digit>, "expires": <datetime>}
+pending_otps = {}
+
+# For FCM push notifications: you'll need your own server key from Firebase
+FCM_SERVER_KEY = "YOUR_FIREBASE_SERVER_KEY_HERE"
+
+def normalize_phone(phone: str) -> str:
     """
-    Sends an SMS to the user’s phone number when they have
-    successfully logged in. This is a simple example that
-    looks up the user’s phone from the USER_PHONE_NUMBERS dict.
+    Remove all non-digit and non-plus characters.
+    Ensure that the string starts with '+' if missing.
     """
-    # If user has no phone in the dict, skip sending
-    if username not in USER_PHONE_NUMBERS:
-        log(f"No phone number found for user={username}; skipping SMS.")
-        return
+    p = re.sub(r"[^0-9+]", "", phone)
+    if not p.startswith('+'):
+        p = '+' + p
+    return p
 
-    to_phone = USER_PHONE_NUMBERS[username]
-    body_text = f"Hello {username}, you have just logged in!"
+def generate_otp_code() -> str:
+    return f"{random.randint(0,999999):06d}"
 
+def send_otp_sms(phone: str, code: str):
+    """
+    Sends the OTP code via Twilio SMS to the given phone number.
+    """
+    body_text = f"Your OTP code is: {code}"
     try:
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
         message = client.messages.create(
             body=body_text,
             from_=TWILIO_FROM_NUMBER,
-            to=to_phone
+            to=phone
         )
-        log(f"Sent Twilio SMS to {username}: SID={message.sid}")
+        log(f"Sent OTP {code} to phone={phone}, SID={message.sid}")
     except Exception as e:
-        log(f"Error sending SMS via Twilio: {e}")
-##############################################################
+        log(f"Error sending OTP via Twilio: {e}")
 
 def get_db_connection():
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
     return conn
 
-# ------------------ DEBUG HELPERS ------------------
 def log(msg):
-    """Simple helper to print debug messages with a prefix."""
     print(f"[DEBUG] {msg}")
-
-
-# -- JINJA FILTERS --
 
 @app.template_filter("human_date")
 def human_date(value):
@@ -106,7 +113,6 @@ def time_taken(created_str, completed_str):
         parts.append(f"{hours}h")
     if minutes:
         parts.append(f"{minutes}m")
-
     return " ".join(parts) if parts else "0m"
 
 @app.template_filter("to_datetime")
@@ -115,23 +121,14 @@ def to_datetime_filter(value):
         return None
     return datetime.fromisoformat(value)
 
-
 def init_db():
     """
-    Initializes the database and inserts default data if empty.
+    Initializes the database and inserts default tasks if empty.
+    We no longer create a 'users' table or default users.
     """
     log("Initializing database...")
     conn = get_db_connection()
     cursor = conn.cursor()
-
-    # Create users table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            password TEXT
-        )
-    ''')
 
     # Create tasks table
     cursor.execute('''
@@ -147,95 +144,48 @@ def init_db():
         )
     ''')
 
-    # Create default users if they don't exist
-    cursor.execute('SELECT COUNT(*) as count FROM users')
-    count_users = cursor.fetchone()['count']
-    if count_users == 0:
-        log("No users found; inserting default users: weasel/123, Otter/1234.")
-        cursor.execute(
-            "INSERT INTO users (username, password) VALUES (?,?)",
-            ("weasel", "123")
+    # Create device_tokens table for push notifications
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS device_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT,
+            token TEXT
         )
-        cursor.execute(
-            "INSERT INTO users (username, password) VALUES (?,?)",
-            ("Otter", "1234")
-        )
-        conn.commit()
+    ''')
 
-    # Create default tasks if they don't exist
+    # Create default tasks if none
     cursor.execute('SELECT COUNT(*) as count FROM tasks')
     count_tasks = cursor.fetchone()['count']
     if count_tasks == 0:
         log("No tasks found; inserting default tasks Wäsche, Küche, kochen.")
         now_str = datetime.utcnow().isoformat()
-        # We'll store times in UTC to keep it consistent
-        cursor.execute("""INSERT INTO tasks (title, creation_date)
-                          VALUES (?, ?)""", ("Wäsche", now_str))
-        cursor.execute("""INSERT INTO tasks (title, creation_date)
-                          VALUES (?, ?)""", ("Küche", now_str))
-        cursor.execute("""INSERT INTO tasks (title, creation_date)
-                          VALUES (?, ?)""", ("kochen", now_str))
+        cursor.execute("INSERT INTO tasks (title, creation_date) VALUES (?,?)", ("Wäsche", now_str))
+        cursor.execute("INSERT INTO tasks (title, creation_date) VALUES (?,?)", ("Küche", now_str))
+        cursor.execute("INSERT INTO tasks (title, creation_date) VALUES (?,?)", ("kochen", now_str))
         conn.commit()
 
     conn.close()
     log("Database init complete.")
 
-
 @app.route('/')
 def index():
     if 'username' in session:
-        log(f"Index called; user '{session['username']}' is already logged in.")
+        log(f"Index called; user '{session['username']}' is logged in.")
         return redirect(url_for('dashboard'))
-    log("Index called; no user in session, showing login page.")
     return render_template('index.html')
-
-
-@app.route('/login', methods=['POST'])
-def login():
-    """
-    Web-based login from an HTML form (index.html).
-    Not used by the Flutter app (which calls /api/login).
-    """
-    log("Web-based /login called (HTML form).")
-    username = request.form.get('username')
-    password = request.form.get('password')
-    log(f"Username={username}, Password={password}")
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM users WHERE username=? AND password=?",
-        (username, password)
-    )
-    user = cursor.fetchone()
-    conn.close()
-
-    if user:
-        log("Web-based login success. Storing session.")
-        session['username'] = username
-        # Send Twilio SMS after successful login
-        send_sms_on_login(username)
-
-        return redirect(url_for('dashboard'))
-    else:
-        log("Web-based login failed. Returning error page.")
-        return render_template('index.html', error="Invalid credentials")
-
 
 @app.route('/logout')
 def logout():
-    log(f"Logout called; clearing session.")
+    log("Logout called; clearing session.")
     session.clear()
     return redirect(url_for('index'))
-
 
 @app.route('/dashboard')
 def dashboard():
     if 'username' not in session:
-        log("Dashboard called, but no user in session. Redirecting to index.")
         return redirect(url_for('index'))
 
-    log("Dashboard called; fetching tasks.")
+    log(f"Dashboard called by user '{session['username']}'")
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM tasks WHERE completed=0")
@@ -246,7 +196,6 @@ def dashboard():
 
     today = datetime.now()
     calendar_days = [today + timedelta(days=i) for i in range(7)]
-
     return render_template(
         'dashboard.html',
         open_tasks=open_tasks,
@@ -255,17 +204,15 @@ def dashboard():
         calendar_days=calendar_days
     )
 
-
 @app.route('/create_task', methods=['POST'])
 def create_task():
     if 'username' not in session:
-        log("create_task called, but no user in session. Redirecting.")
         return redirect(url_for('index'))
 
     title = request.form.get('title')
     duration_hours = request.form.get('duration', 48)
     assigned_to = request.form.get('assigned_to', None)
-    log(f"Creating task title={title}, duration_hours={duration_hours}, assigned_to={assigned_to}.")
+    log(f"Creating task => title={title}, dur={duration_hours}, assigned_to={assigned_to}")
 
     creation_date = datetime.utcnow()
     due_date = creation_date + timedelta(hours=int(duration_hours))
@@ -279,14 +226,22 @@ def create_task():
     conn.commit()
     conn.close()
 
-    log("Task created successfully (web-based). Redirecting to dashboard.")
-    return redirect(url_for('dashboard'))
+    # If assigned, notify that user
+    if assigned_to:
+        # Send push notification
+        send_push_notification_to_user(
+            assigned_to,
+            f"Neue Aufgabe: {title}",
+            f"Fällig bis {due_date.isoformat()}"
+        )
+        # Also schedule 24h/12h/6h/3h/2h/1h reminders
+        schedule_reminders(title, assigned_to, creation_date, due_date)
 
+    return redirect(url_for('dashboard'))
 
 @app.route('/finish_task/<int:task_id>', methods=['POST'])
 def finish_task(task_id):
     if 'username' not in session:
-        log(f"finish_task called, but no user in session. Redirecting.")
         return redirect(url_for('index'))
 
     finisher = session['username']
@@ -301,26 +256,29 @@ def finish_task(task_id):
         WHERE id=?
     """, (finisher, now.isoformat(), task_id))
     conn.commit()
+
+    # Fetch the task info
+    cursor.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
+    row = cursor.fetchone()
     conn.close()
 
-    log("Task marked as completed. Redirecting to dashboard.")
-    return redirect(url_for('dashboard'))
+    if row:
+        title = row["title"]
+        # Send global notification => "Task title" completed by X
+        send_push_notification_to_all(
+            "Aufgabe erledigt",
+            f"'{title}' abgeschlossen von {finisher} am {now.isoformat()}"
+        )
 
+    return redirect(url_for('dashboard'))
 
 @app.route('/stats')
 def stats():
-    """
-    This is the HTML route that renders a Jinja2 template for /stats.
-    The Flutter app does not use this route; it uses /api/stats.
-    """
     if 'username' not in session:
-        log("stats called, but no user in session. Redirecting.")
         return redirect(url_for('index'))
 
-    log("Stats called; fetching completions + all tasks (HTML).")
     conn = get_db_connection()
     cursor = conn.cursor()
-
     cursor.execute("""
         SELECT completed_by, COUNT(*) as total_completed
         FROM tasks
@@ -329,19 +287,14 @@ def stats():
     """)
     completions = cursor.fetchall()
 
-    cursor.execute("""
-        SELECT * FROM tasks
-        ORDER BY creation_date ASC
-    """)
+    cursor.execute("SELECT * FROM tasks ORDER BY creation_date ASC")
     all_tasks = cursor.fetchall()
-
     conn.close()
-    return render_template('stats.html', completions=completions, all_tasks=all_tasks)
 
+    return render_template('stats.html', completions=completions, all_tasks=all_tasks)
 
 @app.route('/export_csv')
 def export_csv():
-    log("export_csv called; exporting tasks as CSV.")
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM tasks")
@@ -350,20 +303,15 @@ def export_csv():
 
     si = io.StringIO()
     cw = csv.writer(si)
-    cw.writerow([
-        "id", "title", "assigned_to", "creation_date",
-        "due_date", "completed", "completed_by", "completed_on"
-    ])
+    cw.writerow(["id","title","assigned_to","creation_date","due_date","completed","completed_by","completed_on"])
     for row in rows:
         cw.writerow(list(row))
 
     output = make_csv_response(si.getvalue(), "tasks.csv")
     return output
 
-
 @app.route('/export_xlsx')
 def export_xlsx():
-    log("export_xlsx called; exporting tasks as 'fake' XLSX CSV.")
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM tasks")
@@ -372,87 +320,79 @@ def export_xlsx():
 
     si = io.StringIO()
     cw = csv.writer(si)
-    cw.writerow([
-        "id", "title", "assigned_to", "creation_date",
-        "due_date", "completed", "completed_by", "completed_on"
-    ])
+    cw.writerow(["id","title","assigned_to","creation_date","due_date","completed","completed_by","completed_on"])
     for row in rows:
         cw.writerow(list(row))
 
     output = make_csv_response(si.getvalue(), "tasks.xlsx")
     return output
 
-
 def make_csv_response(csv_string, filename):
     output = io.BytesIO()
     output.write(csv_string.encode('utf-8'))
     output.seek(0)
-    return send_file(
-        output,
-        mimetype="text/csv",
-        as_attachment=True,
-        download_name=filename
-    )
+    return send_file(output, mimetype="text/csv", as_attachment=True, download_name=filename)
 
-
-# -------------- NEW: FLUTTER/WEB API ENDPOINTS ---------------
+# ------------------- FLUTTER / MOBILE API ---------------------
 
 @app.route('/api/heartbeat', methods=['GET'])
 def api_heartbeat():
-    """
-    Simple heartbeat check:
-    Returns { "status": "ok" }
-    """
-    log("API GET /api/heartbeat called. Returning {status: ok}.")
+    log("API GET /api/heartbeat called.")
     return jsonify({"status": "ok"}), 200
 
+@app.route('/api/request_otp', methods=['POST'])
+def api_request_otp():
+    data = request.get_json() or {}
+    raw_phone = data.get("phone", "").strip()
+    log(f"API /api/request_otp => raw_phone={raw_phone}")
 
-@app.route('/api/login', methods=['POST'])
-def api_login():
-    """
-    JSON-based login for Flutter.
-    Expects:
-      { "username": "...", "password": "..." }
-    Returns 200 with {"status": "ok"} if valid,
-    401 if invalid, or 400 if missing data.
-    """
-    log("API /api/login called.")
-    data = request.get_json()
-    log(f"  Received data: {data}")
-    if not data or "username" not in data or "password" not in data:
-        log("  Missing credentials in JSON.")
-        return jsonify({"status": "error", "message": "Missing credentials"}), 400
+    if not raw_phone:
+        return jsonify({"status": "error", "message": "No phone provided"}), 400
 
-    username = data["username"]
-    password = data["password"]
-    log(f"  Attempting login with username={username}")
+    phone = normalize_phone(raw_phone)
+    if phone not in PHONE_TO_USERNAME:
+        return jsonify({"status": "error", "message": "Phone not recognized"}), 404
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
-    user = cursor.fetchone()
-    conn.close()
+    code = generate_otp_code()
+    expires_at = datetime.utcnow() + timedelta(minutes=5)
+    pending_otps[phone] = {"code": code, "expires": expires_at}
+    send_otp_sms(phone, code)
 
-    if user:
-        log("  Login successful!")
-        # Send Twilio SMS after successful login
-        send_sms_on_login(username)
+    return jsonify({"status": "otp_sent"}), 200
 
-        return jsonify({"status": "ok", "message": "Login successful"}), 200
-    else:
-        log("  Invalid credentials. Returning 401.")
-        return jsonify({"status": "fail", "message": "Invalid credentials"}), 401
+@app.route('/api/verify_otp', methods=['POST'])
+def api_verify_otp():
+    data = request.get_json() or {}
+    raw_phone = data.get("phone", "").strip()
+    otp_code = data.get("otp_code", "").strip()
+    if not raw_phone or not otp_code:
+        return jsonify({"status": "error", "message": "Missing phone or otp_code"}), 400
 
+    phone = normalize_phone(raw_phone)
+    if phone not in PHONE_TO_USERNAME:
+        return jsonify({"status": "error", "message": "Phone not recognized"}), 404
+
+    entry = pending_otps.get(phone)
+    if not entry:
+        return jsonify({"status": "fail", "message": "No OTP pending"}), 401
+    if datetime.utcnow() > entry["expires"]:
+        del pending_otps[phone]
+        return jsonify({"status": "fail", "message": "OTP expired"}), 401
+    if otp_code != entry["code"]:
+        return jsonify({"status": "fail", "message": "Incorrect code"}), 401
+
+    username = PHONE_TO_USERNAME[phone]
+    session['username'] = username
+    del pending_otps[phone]
+    return jsonify({"status": "ok", "username": username}), 200
 
 @app.route('/api/tasks', methods=['GET'])
 def api_get_tasks():
-    log("API GET /api/tasks called.")
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM tasks")
     rows = cursor.fetchall()
     conn.close()
-    log(f"  Found {len(rows)} tasks total.")
 
     tasks_list = []
     for row in rows:
@@ -468,14 +408,10 @@ def api_get_tasks():
         })
     return jsonify(tasks_list), 200
 
-
 @app.route('/api/tasks', methods=['POST'])
 def api_create_task():
-    log("API POST /api/tasks called (create new task).")
     data = request.get_json()
-    log(f"  Received data: {data}")
     if not data or "title" not in data:
-        log("  Title is missing in JSON.")
         return jsonify({"error": "Title is required"}), 400
 
     title = data["title"]
@@ -510,15 +446,22 @@ def api_create_task():
         "completed_on": row["completed_on"]
     }
     log(f"  Task created with id={new_id}.")
-    return jsonify(created_task), 201
 
+    # If assigned, notify user
+    if assigned_to:
+        send_push_notification_to_user(
+            assigned_to,
+            f"Neue Aufgabe: {title}",
+            f"Fällig bis {due_date.isoformat()}"
+        )
+        schedule_reminders(title, assigned_to, creation_date, due_date)
+
+    return jsonify(created_task), 201
 
 @app.route('/api/tasks/<int:task_id>/finish', methods=['POST'])
 def api_finish_task(task_id):
-    log(f"API POST /api/tasks/{task_id}/finish called.")
     data = request.get_json(silent=True) or {}
     finisher = data.get("username", "Unknown")
-    log(f"  Marking task as finished by {finisher}.")
     now = datetime.utcnow()
 
     conn = get_db_connection()
@@ -535,7 +478,6 @@ def api_finish_task(task_id):
     conn.close()
 
     if row is None:
-        log("  Task not found!")
         return jsonify({"error": "Task not found"}), 404
 
     updated_task = {
@@ -548,31 +490,21 @@ def api_finish_task(task_id):
         "completed_by": row["completed_by"],
         "completed_on": row["completed_on"]
     }
-    log(f"  Task {task_id} completed successfully.")
+    log(f"  Task {task_id} completed successfully by {finisher}.")
+
+    # Notify all devices => "Task completed"
+    send_push_notification_to_all(
+        "Aufgabe erledigt",
+        f"'{row['title']}' abgeschlossen von {finisher} am {now.isoformat()}"
+    )
+
     return jsonify(updated_task), 200
 
-
-# --- NEW JSON STATS ENDPOINT FOR FLUTTER ---
 @app.route('/api/stats', methods=['GET'])
 def api_stats():
-    """
-    Returns JSON:
-    {
-      "completions": [
-        { "completed_by": "Wiesel", "total_completed": 5 },
-        ...
-      ],
-      "all_tasks": [
-        { "id":1, "title":"...", "assigned_to":"...", etc. },
-        ...
-      ]
-    }
-    """
-    log("API GET /api/stats called.")
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Query completions
     cursor.execute("""
         SELECT completed_by, COUNT(*) as total_completed
         FROM tasks
@@ -589,12 +521,7 @@ def api_stats():
             "total_completed": row["total_completed"]
         })
 
-    # Query all tasks
-    cursor.execute("""
-        SELECT *
-        FROM tasks
-        ORDER BY creation_date ASC
-    """)
+    cursor.execute("SELECT * FROM tasks ORDER BY creation_date ASC")
     all_rows = cursor.fetchall()
     conn.close()
 
@@ -617,8 +544,107 @@ def api_stats():
     }
     return jsonify(result), 200
 
+# Register device token => store in DB
+@app.route('/api/register_token', methods=['POST'])
+def register_token():
+    """
+    Expects JSON: { "token": "...", "username": "..." }
+    Stores or updates the device token for the user in 'device_tokens'.
+    """
+    data = request.get_json(silent=True) or {}
+    token = data.get("token", "").strip()
+    username = data.get("username", "").strip()
+    if not token or not username:
+        return jsonify({"error": "Missing token or username"}), 400
 
-# Initialize DB once at startup
+    log(f"register_token => user={username}, token={token}")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Check if already stored
+    cursor.execute("SELECT * FROM device_tokens WHERE username=? AND token=?", (username, token))
+    row = cursor.fetchone()
+    if row:
+        log("Token already exists. No change.")
+    else:
+        # Insert new
+        cursor.execute("INSERT INTO device_tokens (username, token) VALUES (?,?)", (username, token))
+        conn.commit()
+
+    conn.close()
+    return jsonify({"status": "ok"}), 200
+
+def schedule_reminders(task_title, assigned_user, creation_date, due_date):
+    """
+    Schedules reminders at 24h,12h,6h,3h,2h,1h before 'due_date'
+    In real usage, you'd do a background job or cron.
+    For demonstration, we just log them.
+    """
+    # We'll just compute the times in UTC, store them, etc.
+    # In real usage, you'd store in a 'reminders' table and have a cron check them.
+    intervals = [24, 12, 6, 3, 2, 1]  # hours
+    for h in intervals:
+        remind_time = due_date - timedelta(hours=h)
+        log(f"Scheduling reminder: {task_title} -> user={assigned_user}, at {remind_time.isoformat()}")
+        # In a real system, you'd store in DB and have a cron or celery to check.
+
+def send_push_notification_to_user(username, title, body):
+    """
+    Looks up device tokens for the given username, sends an FCM push.
+    """
+    if not username:
+        return
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT token FROM device_tokens WHERE username=?", (username,))
+    tokens = [row["token"] for row in cursor.fetchall()]
+    conn.close()
+    for t in tokens:
+        _send_fcm_push(t, title, body)
+
+def send_push_notification_to_all(title, body):
+    """
+    Sends a push notification to ALL known device tokens.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT token FROM device_tokens")
+    tokens = [row["token"] for row in cursor.fetchall()]
+    conn.close()
+
+    for t in tokens:
+        _send_fcm_push(t, title, body)
+
+def _send_fcm_push(token, title, body):
+    """
+    Actually do the POST to FCM with the server key.
+    """
+    if not FCM_SERVER_KEY or FCM_SERVER_KEY.startswith("YOUR_"):
+        log("FCM_SERVER_KEY is missing or placeholder. Skipping actual push.")
+        return
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"key={FCM_SERVER_KEY}"
+    }
+    payload = {
+        "to": token,
+        "notification": {
+            "title": title,
+            "body": body,
+            "sound": "default",
+        },
+        "data": {
+            "click_action": "FLUTTER_NOTIFICATION_CLICK",
+            "extra": "some_data_here"
+        }
+    }
+    try:
+        resp = requests.post("https://fcm.googleapis.com/fcm/send", headers=headers, json=payload)
+        log(f"FCM push => status {resp.status_code}, resp={resp.text}")
+    except Exception as e:
+        log(f"Error sending FCM push => {e}")
+
 init_db()
 
 if __name__ == '__main__':

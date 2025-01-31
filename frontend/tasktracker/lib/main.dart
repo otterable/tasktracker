@@ -20,13 +20,13 @@ Future<void> _initNotifications() async {
   // Android initialization
   const AndroidInitializationSettings initializationSettingsAndroid =
       AndroidInitializationSettings('@mipmap/ic_launcher');
-  // Ensure you have an ic_launcher in mipmap
+  // Ensure you have a corresponding ic_launcher in the mipmap folders
 
   // iOS initialization
   final DarwinInitializationSettings initializationSettingsIOS =
       DarwinInitializationSettings();
 
-  // Windows, etc.
+  // Windows, macOS, etc. if desired
   final InitializationSettings initializationSettings = InitializationSettings(
     android: initializationSettingsAndroid,
     iOS: initializationSettingsIOS,
@@ -35,7 +35,7 @@ Future<void> _initNotifications() async {
   await flutterLocalNotificationsPlugin.initialize(
     initializationSettings,
     onDidReceiveNotificationResponse: (response) {
-      // handle notification tap
+      // handle notification tap or action here if desired
     },
   );
 }
@@ -126,8 +126,8 @@ class _MyTaskTrackerAppState extends State<MyTaskTrackerApp> {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          foregroundColor: Colors.white, // button text color
-          backgroundColor: const Color(0xFFFF5C00), // orange
+          foregroundColor: Colors.white,
+          backgroundColor: const Color(0xFFFF5C00),
           textStyle: const TextStyle(
             fontFamily: 'Roboto',
             fontWeight: FontWeight.bold,
@@ -138,7 +138,8 @@ class _MyTaskTrackerAppState extends State<MyTaskTrackerApp> {
     );
 
     return MaterialApp(
-      title: 'Flutter Task Tracker',
+      // Updated to "Molentracker" if you want that as the displayed title
+      title: 'Molentracker',
       theme: theme,
       home: _isLoggedIn
           ? DashboardScreen(

@@ -57,14 +57,23 @@ class _StatsScreenState extends State<StatsScreen> {
   bool _loading = false;
   StatsResponse? _stats;
 
+  /// We place the old “Zeitraum” stuff here:
+  final List<String> _statRanges = [
+    "Letzte 7 Tage",
+    "Seit Montag",
+    "Letzte 14 Tage",
+    "Letzte 30 Tage",
+    "Aktueller Monat",
+  ];
+  String _selectedStatRange = "Letzte 7 Tage";
+
   // We'll store final chart data in these:
   List<PieChartSectionData> _pieSections = [];
   List<BarChartGroupData> _avgTimeBarGroups = [];
   List<BarChartGroupData> _mostCompletedBarGroups = [];
-  List<FlSpot> _tasksOverTimeSpots = []; // for a single line
+  List<FlSpot> _tasksOverTimeSpots = []; // single line
   List<BarChartGroupData> _dayOfWeekBarGroups = [];
-  // For multi-line chart, each line is a list of spots
-  List<LineChartBarData> _multiLineBarData = [];
+  List<LineChartBarData> _multiLineBarData = []; // multi-line
 
   @override
   void initState() {
@@ -87,7 +96,6 @@ class _StatsScreenState extends State<StatsScreen> {
     }
   }
 
-  /// Private helper to open a URL (CSV / XLSX export) externally.
   Future<void> _launchUrl(String url) async {
     final uri = Uri.parse(url);
     if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
@@ -106,6 +114,7 @@ class _StatsScreenState extends State<StatsScreen> {
 
     // 2) Bar Chart: average completion times
     final avgTimeData = <CompletionTimeChart>[
+      // Example data
       CompletionTimeChart("Wiesel", 12),
       CompletionTimeChart("Otter", 9),
     ];
@@ -119,9 +128,7 @@ class _StatsScreenState extends State<StatsScreen> {
         taskCounts[title] = (taskCounts[title] ?? 0) + 1;
       }
     }
-    final tasksList = taskCounts.entries
-        .map((e) => TaskTypeCountChart(e.key, e.value))
-        .toList();
+    final tasksList = taskCounts.entries.map((e) => TaskTypeCountChart(e.key, e.value)).toList();
     tasksList.sort((a, b) => b.count.compareTo(a.count));
     final top5 = tasksList.take(5).toList();
     _mostCompletedBarGroups = _buildMostCompletedBarGroups(top5);
@@ -131,7 +138,7 @@ class _StatsScreenState extends State<StatsScreen> {
     final tasksOverTimeData = <TasksOverTime>[];
     for (int i = 6; i >= 0; i--) {
       final day = now.subtract(Duration(days: i));
-      final count = (i * 2) + 1; // dummy
+      final count = (i * 2) + 1; // dummy data
       tasksOverTimeData.add(TasksOverTime(day, count));
     }
     _tasksOverTimeSpots = _buildLineSpots(tasksOverTimeData);
@@ -156,10 +163,7 @@ class _StatsScreenState extends State<StatsScreen> {
       wieselLine.add(MultiLineActivity(day, (i * 2) + 2));
       otterLine.add(MultiLineActivity(day, (i * 3) + 1));
     }
-    _multiLineBarData = _buildMultiLineData(
-      wieselLine,
-      otterLine,
-    );
+    _multiLineBarData = _buildMultiLineData(wieselLine, otterLine);
   }
 
   // ---------- BUILD PIE DATA ----------
@@ -213,9 +217,7 @@ class _StatsScreenState extends State<StatsScreen> {
   }
 
   // ---------- BUILD BAR DATA (Most Completed Tasks) ----------
-  List<BarChartGroupData> _buildMostCompletedBarGroups(
-    List<TaskTypeCountChart> data,
-  ) {
+  List<BarChartGroupData> _buildMostCompletedBarGroups(List<TaskTypeCountChart> data) {
     final groups = <BarChartGroupData>[];
     for (int i = 0; i < data.length; i++) {
       final item = data[i];
@@ -250,9 +252,7 @@ class _StatsScreenState extends State<StatsScreen> {
   }
 
   // ---------- BUILD BAR DATA (Day of Week) ----------
-  List<BarChartGroupData> _buildDayOfWeekBarGroups(
-    List<DayOfWeekCountChart> data,
-  ) {
+  List<BarChartGroupData> _buildDayOfWeekBarGroups(List<DayOfWeekCountChart> data) {
     final groups = <BarChartGroupData>[];
     for (int i = 0; i < data.length; i++) {
       final item = data[i];
@@ -334,11 +334,63 @@ class _StatsScreenState extends State<StatsScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // 1) Who completed how many
+            // 1) The “Zeitraum” section from old Dashboard
+            Card(
+              elevation: 4,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text("Statistiken (Zeitraum)",
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Text("Zeitraum: "),
+                        const SizedBox(width: 8),
+                        DropdownButton<String>(
+                          value: _selectedStatRange,
+                          items: _statRanges.map((s) {
+                            return DropdownMenuItem<String>(
+                              value: s,
+                              child: Text(s),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            setState(() {
+                              _selectedStatRange = val ?? "Letzte 7 Tage";
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Text("Aufgaben zugewiesen ($_selectedStatRange):",
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const Text("• Wiesel: 3"),
+                    const Text("• Otter: 4"),
+                    const SizedBox(height: 10),
+                    Text("Aufgaben erledigt ($_selectedStatRange):",
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const Text("• Wiesel: 2"),
+                    const Text("• Otter: 5"),
+                    const SizedBox(height: 10),
+                    Text("Durchschnittliche Bearbeitungszeit ($_selectedStatRange):",
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    const Text("• Wiesel: 12h"),
+                    const Text("• Otter: 9h"),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+            // 2) Who completed how many
             _buildCompletionCountsCard(),
             const SizedBox(height: 16),
 
-            // 2) Show a bar chart for average time
+            // 3) Bar chart for average time
             _buildBarChartCard(
               title: "Durchschnittliche Erledigungszeit (Stunden)",
               barGroups: _avgTimeBarGroups,
@@ -346,22 +398,22 @@ class _StatsScreenState extends State<StatsScreen> {
             ),
             const SizedBox(height: 16),
 
-            // 3) Show a bar chart for most completed tasks
+            // 4) Bar chart for most completed tasks
             _buildBarChartCard(
               title: "Meistabgeschlossene Aufgaben (Top 5)",
               barGroups: _mostCompletedBarGroups,
-              labels: _mostCompletedBarGroups.map((e) => "").toList(),
+              labels: _mostCompletedBarGroups.map((_) => "").toList(),
             ),
             const SizedBox(height: 16),
 
-            // 4) Single line chart
+            // 5) Single line chart
             _buildLineChartCard(
               title: "Abgeschlossene Aufgaben über Zeit",
               spots: _tasksOverTimeSpots,
             ),
             const SizedBox(height: 16),
 
-            // 5) day-of-week
+            // 6) day-of-week
             _buildBarChartCard(
               title: "Aufgaben pro Wochentag",
               barGroups: _dayOfWeekBarGroups,
@@ -369,7 +421,7 @@ class _StatsScreenState extends State<StatsScreen> {
             ),
             const SizedBox(height: 16),
 
-            // 6) multi-line
+            // 7) multi-line
             _buildMultiLineChartCard(
               title: "Mehrlinien-Vergleich (Wiesel vs Otter)",
               lines: _multiLineBarData,
@@ -437,8 +489,7 @@ class _StatsScreenState extends State<StatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Expanded(
               child: BarChart(
@@ -483,8 +534,7 @@ class _StatsScreenState extends State<StatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Expanded(
               child: LineChart(
@@ -520,7 +570,7 @@ class _StatsScreenState extends State<StatsScreen> {
     );
   }
 
-  // Multi-line
+  // Multi-line chart
   Widget _buildMultiLineChartCard({
     required String title,
     required List<LineChartBarData> lines,
@@ -533,8 +583,7 @@ class _StatsScreenState extends State<StatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Expanded(
               child: LineChart(
