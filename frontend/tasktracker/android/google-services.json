@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "226742919528",
+    "project_id": "molentracker",
+    "storage_bucket": "molentracker.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:226742919528:android:0bce79e3ce182ae13276dd",
+        "android_client_info": {
+          "package_name": "com.molentracker"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBZQgPSEGnDK6Y8oYlawOm0Ef_tx1pm1mM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

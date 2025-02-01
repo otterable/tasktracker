@@ -3,6 +3,8 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    // Add the Google services Gradle plugin so that google-services.json is processed.
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -21,11 +23,9 @@ android {
     }
 
     defaultConfig {
-        // You asked for the ID: "Molentracker". 
-        // Typically, a valid applicationId has at least 2 segments, so we set it to "com.molentracker"
+        // Set the applicationId to "com.molentracker"
         applicationId = "com.molentracker"
-
-        // The rest remain from flutter variables:
+        // Use the Flutter-provided values:
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

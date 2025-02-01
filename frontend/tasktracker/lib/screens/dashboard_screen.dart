@@ -8,7 +8,7 @@ import 'package:flutter_tasktracker/models/task.dart';
 import 'package:flutter_tasktracker/screens/personal_stats_screen.dart';
 import 'package:flutter_tasktracker/screens/stats_screen.dart';
 import 'package:flutter_tasktracker/utils.dart';
-import 'package:flutter_tasktracker/notification_service.dart'; // We'll create this
+import 'package:flutter_tasktracker/notification_service.dart'; // Must be implemented separately
 
 class DashboardScreen extends StatefulWidget {
   final String currentUser;
@@ -39,7 +39,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _assignedTo;
   final List<String?> _assignments = [null, "Wiesel", "Otter"];
 
-  // Calendar
+  // Calendar view and current month
   String _calendarView = "Woche";
   DateTime _currentMonth = DateTime(DateTime.now().year, DateTime.now().month);
 
@@ -76,10 +76,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ================= NOTIFICATIONS =================
   void _scheduleNotifications(Task task, String action) async {
-    // This is just a demonstration of local notifications usage.
-    // For real usage, you'd do scheduling, push tokens, etc.
-
-    // E.g. if (action == "new"), show local notification
+    // This is a demonstration of local notifications usage.
     if (action == "new" && task.assignedTo != null) {
       final body = "Neue Aufgabe '${task.title}' zugewiesen an ${task.assignedTo!}";
       NotificationService.showNotification(
@@ -99,17 +96,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
     } else if (action == "resend") {
       NotificationService.showNotification(
-        title: "Benachrichtigung erneut gesendet",
+        title: "Benachr. erneut gesendet",
         body: "Aufgabe: ${task.title}",
       );
     }
   }
 
-  // =================================================
-  //   NEW TASK
-  // =================================================
+  // ================= NEW TASK =================
   void _showNewTaskDialog() {
-    // Reset
+    // Reset fields
     _selectedTitle = "Wäsche";
     _customTitleController.clear();
     _selectedDuration = 48;
@@ -255,9 +250,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // =================================================
-  //   FINISH TASK
-  // =================================================
+  // ================= FINISH TASK =================
   void _confirmFinishTask(Task task) {
     final assignedTo = task.assignedTo ?? "";
     final isMine = assignedTo.toLowerCase() == widget.currentUser.toLowerCase();
@@ -314,9 +307,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // =================================================
-  //   EDIT TASK
-  // =================================================
+  // ================= EDIT TASK =================
   void _showEditTaskPopup(Task task) {
     final newAssigned = ValueNotifier<String?>(task.assignedTo);
     final newDuration = ValueNotifier<int>(48);
@@ -428,9 +419,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // =================================================
-  //   DELETE TASK
-  // =================================================
+  // ================= DELETE TASK =================
   void _confirmDeleteTask(Task task) {
     showDialog(
       context: context,
@@ -465,17 +454,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // =================================================
-  //   RESEND NOTIFICATION
-  // =================================================
+  // ================= RESEND NOTIFICATION =================
   void _resendNotification(Task task) {
     debugPrint("Resending notification => Task ID ${task.id}");
     _scheduleNotifications(task, "resend");
   }
 
-  // =================================================
-  //   SHOW TASK DIALOG
-  // =================================================
+  // ================= SHOW TASK DIALOG =================
   void _showTaskDialog(Task task) {
     final isCompleted = (task.completed == 1);
     final taskColor = _op(_getTaskColor(task.title), 1.0);
@@ -629,9 +614,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // =================================================
-  //   CALENDAR
-  // =================================================
+  // ================= CALENDAR =================
+  void _previousMonth() {
+    setState(() {
+      _currentMonth = DateTime(_currentMonth.year, _currentMonth.month - 1);
+    });
+  }
+
+  void _nextMonth() {
+    setState(() {
+      _currentMonth = DateTime(_currentMonth.year, _currentMonth.month + 1);
+    });
+  }
+
   Widget _buildCalendarSelector() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -660,7 +655,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildCalendar() {
-    // Full width => remove the Card; let's just return a Container
     switch (_calendarView) {
       case "Woche":
         return _buildWeekCalendar();
@@ -674,11 +668,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildWeekCalendar() {
     final now = DateTime.now();
-    final weekday = now.weekday; // Monday=1
+    final weekday = now.weekday; // Monday = 1
     final monday = now.subtract(Duration(days: weekday - 1));
     final days = List.generate(7, (i) => monday.add(Duration(days: i)));
 
-    // big container from edge to edge
     return Container(
       margin: EdgeInsets.zero,
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -706,7 +699,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final firstDayOfMonth = DateTime(_currentMonth.year, _currentMonth.month, 1);
     final daysInMonth = DateTime(_currentMonth.year, _currentMonth.month + 1, 0).day;
 
-    final firstWeekday = firstDayOfMonth.weekday; // 1=Mon
+    final firstWeekday = firstDayOfMonth.weekday; // 1 = Monday
     final offset = (firstWeekday - 1) % 7;
     final tiles = <DateTime?>[];
     for (int i = 0; i < offset; i++) {
@@ -874,7 +867,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ? Text("Zugewiesen an: ${t.assignedTo!}")
                         : const Text("Niemand zugewiesen"),
                     onTap: () {
-                      Navigator.of(ctx).pop(); // close day-tasks
+                      Navigator.of(ctx).pop();
                       _showTaskDialog(t);
                     },
                   );
@@ -912,9 +905,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return tasks;
   }
 
-  // =================================================
-  //   OPEN & COMPLETED TASKS
-  // =================================================
+  // ================= OPEN & COMPLETED TASKS =================
   Widget _buildAssignedToYouSection(List<Task> tasks, int count) {
     return Card(
       elevation: 4,
@@ -994,7 +985,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   margin: const EdgeInsets.symmetric(vertical: 6),
                   child: Column(
                     children: [
-                      // Title row + overflow menu (3 dots)
+                      // Title row + 3-dot menu
                       Row(
                         children: [
                           Expanded(
@@ -1027,7 +1018,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               onTap: () => _showTaskDialog(task),
                             ),
                           ),
-                          // 3-dot menu
+                          // 3-dot menu for Edit, Delete, Resend Notification
                           PopupMenuButton<String>(
                             onSelected: (value) {
                               if (value == "edit") {
@@ -1105,7 +1096,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildErledigteAufgaben(List<Task> erledigte) {
-    final filtered = erledigte; // or real filter logic
+    final filtered = erledigte; // or apply filter logic based on _selectedCompletedRange
 
     return Card(
       elevation: 4,
@@ -1221,9 +1212,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // =================================================
-  //   TIME BAR
-  // =================================================
+  // ================= TIME BAR =================
   Widget _buildTimeRemainingBar(String? creationStr, String? dueStr) {
     if (creationStr == null || dueStr == null) return const SizedBox();
     final now = DateTime.now();
@@ -1257,7 +1246,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
-                    fontSize: 14, // same as "Erstellt am"
+                    fontSize: 14,
                   ),
                 ),
               ),
@@ -1268,9 +1257,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // =================================================
-  //   BOTTOM BAR
-  // =================================================
+  // ================= BOTTOM BAR =================
   Widget _buildBottomBar() {
     return Container(
       height: 60,
@@ -1294,7 +1281,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             label: "Statistiken",
             onTapOverride: () {
               setState(() => _selectedBottomIndex = 1);
-              // Navigate to StatsScreen
               Navigator.pushReplacement(
                 context,
                 MaterialPageRoute(builder: (_) => const StatsScreen()),
@@ -1307,7 +1293,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             label: "Pers. Stats",
             onTapOverride: () {
               setState(() => _selectedBottomIndex = 2);
-              // Navigate to personal stats
               Navigator.pushReplacement(
                 context,
                 MaterialPageRoute(
@@ -1352,9 +1337,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // =================================================
-  //   HELPER
-  // =================================================
+  // ================= NAVIGATION HELPER =================
+  void _goToUserStats(String username) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => PersonalStatsScreen(username: username)),
+    );
+  }
+
+  // ================= BUILD =================
+  @override
+  Widget build(BuildContext context) {
+    final offeneAufgaben = allTasks.where((t) => t.completed == 0).toList();
+    final completedTasks = allTasks.where((t) => t.completed == 1).toList();
+
+    // "Assigned to you" tasks:
+    final userAssignedOpenTasks = allTasks.where((t) {
+      if (t.completed == 1) return false;
+      if (t.assignedTo == null) return false;
+      return t.assignedTo!.toLowerCase() == widget.currentUser.toLowerCase();
+    }).toList();
+    final assignedCount = userAssignedOpenTasks.length;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Willkommen, ${widget.currentUser}"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: _showNewTaskDialog,
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: widget.onLogout,
+          ),
+        ],
+      ),
+      bottomNavigationBar: _buildBottomBar(),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            _buildAssignedToYouSection(userAssignedOpenTasks, assignedCount),
+            const SizedBox(height: 16),
+            _buildOffeneAufgabenListe(offeneAufgaben),
+            const SizedBox(height: 16),
+            _buildCalendarSelector(),
+            const SizedBox(height: 16),
+            _buildCalendar(),
+            const SizedBox(height: 16),
+            _buildErledigteAufgaben(completedTasks),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ================= HELPER =================
   Color _op(Color base, double fraction) {
     final alpha = (fraction * 255).round().clamp(0, 255);
     return base.withAlpha(alpha);
