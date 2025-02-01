@@ -14,12 +14,16 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        // Set Java compile options to Java 17 (the highest Kotlin supports)
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        // Enable core library desugaring for libraries such as flutter_local_notifications
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_1_8.toString()
+        // Set the JVM target to "17"
+        jvmTarget = "17"
     }
 
     defaultConfig {
@@ -33,20 +37,21 @@ android {
     }
 
     signingConfigs {
-        release {
+        // Create a signing config for release builds
+        create("release") {
             // Replace the file path with the actual location of your release keystore.
-            storeFile = file("C:/Users/ottr/molentracker-release.jks")
+            storeFile = file("C:/Users/ottr/Documents/GitHub/tasktracker/frontend/tasktracker/android/molentracker-release.jks")
             // Replace these with your actual keystore and key passwords.
-            storePassword = "your_store_password"
+            storePassword = "moulin"
             keyAlias = "molentracker"
-            keyPassword = "your_key_password"
+            keyPassword = "moulin"
         }
     }
 
     buildTypes {
         release {
-            // Use the release signing config for release builds.
-            signingConfig = signingConfigs.release
+            // Use the release signing config created above.
+            signingConfig = signingConfigs.getByName("release")
             // Optionally, enable code shrinking and obfuscation with ProGuard:
             // isMinifyEnabled = true
             // proguardFiles(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro")
@@ -56,4 +61,9 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Add the desugaring library dependency required by flutter_local_notifications.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.2")
 }

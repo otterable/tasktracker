@@ -51,10 +51,10 @@ PHONE_TO_USERNAME = {
 # Dictionary to store OTP requests
 pending_otps = {}
 
-# ----- Firebase Admin Initialization ----- 
-# Replace the path below with the path to your downloaded service account JSON file.
+# ----- Firebase Admin Initialization -----
+# The service account file is expected to be in the same directory as this app.
 try:
-    cred = credentials.Certificate("path/to/your-service-account-file.json")
+    cred = credentials.Certificate("service-account.json")
     firebase_admin.initialize_app(cred)
     log_msg = "Firebase Admin initialized successfully."
 except Exception as e:
@@ -175,12 +175,53 @@ def init_db():
     conn.close()
     log("Database init complete.")
 
+###############################################################################
+# NEW: Demo Index & Notification Routes
+###############################################################################
+
 @app.route('/')
 def index():
-    if 'username' in session:
-        log(f"Index: user '{session['username']}' is logged in.")
-        return redirect(url_for('dashboard'))
-    return render_template('index.html')
+    """
+    Demo index page that shows:
+      - A form to send demo notifications (to selected users or all users)
+      - Heartbeat status (assumed OK if this page loads)
+      - A list of current open tasks
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM tasks WHERE completed=0")
+    open_tasks = cursor.fetchall()
+    conn.close()
+    heartbeat_status = "OK"  # If the page is rendered, the server is up.
+    return render_template('index.html', open_tasks=open_tasks, heartbeat_status=heartbeat_status)
+
+@app.route('/send_notification', methods=['POST'])
+def send_notification():
+    """
+    Handles demo notification submissions.
+      - If "target" equals "selected", sends a notification to the provided username.
+      - If "target" equals "all", sends a notification to all registered device tokens.
+    """
+    target = request.form.get("target")
+    title = request.form.get("title", "Demo Notification")
+    body = request.form.get("body", "This is a demo notification.")
+    
+    if target == "selected":
+        username = request.form.get("username", "").strip()
+        if username:
+            send_push_notification_to_user(username, title, body)
+            log(f"[send_notification] Notification sent to user: {username}")
+        else:
+            log("[send_notification] No username provided for selected target.")
+    else:
+        send_push_notification_to_all(title, body)
+        log("[send_notification] Notification sent to all users.")
+
+    return redirect(url_for('index'))
+
+###############################################################################
+# End of Demo Routes
+###############################################################################
 
 @app.route('/logout')
 def logout():
