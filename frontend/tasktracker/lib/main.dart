@@ -4,9 +4,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // for SystemChrome if needed
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-
-// 1) Import for intl date formatting
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter_tasktracker/screens/login_screen.dart';
 import 'package:flutter_tasktracker/screens/dashboard_screen.dart';
@@ -26,7 +25,7 @@ Future<void> _initNotifications() async {
   final DarwinInitializationSettings initializationSettingsIOS =
       DarwinInitializationSettings();
 
-  // Windows, macOS, etc. if desired
+  // Other platforms if desired
   final InitializationSettings initializationSettings = InitializationSettings(
     android: initializationSettingsAndroid,
     iOS: initializationSettingsIOS,
@@ -43,20 +42,23 @@ Future<void> _initNotifications() async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 2) Initialize date formatting for the German locale
+  // 1) Initialize date formatting for the German locale
   await initializeDateFormatting('de_DE', null);
 
-  // 3) Initialize local notifications
+  // 2) Initialize local notifications
   await _initNotifications();
 
-  // Optionally restrict orientation (uncomment if needed):
-  // await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  // 3) Load persistent login state before running the app
+  final prefs = await SharedPreferences.getInstance();
+  final storedUser = prefs.getString('currentUser') ?? "";
 
-  runApp(const MyTaskTrackerApp());
+  runApp(MyTaskTrackerApp(initialUser: storedUser));
 }
 
 class MyTaskTrackerApp extends StatefulWidget {
-  const MyTaskTrackerApp({Key? key}) : super(key: key);
+  final String initialUser;
+
+  const MyTaskTrackerApp({Key? key, required this.initialUser}) : super(key: key);
 
   @override
   State<MyTaskTrackerApp> createState() => _MyTaskTrackerAppState();
@@ -65,13 +67,16 @@ class MyTaskTrackerApp extends StatefulWidget {
 class _MyTaskTrackerAppState extends State<MyTaskTrackerApp> {
   bool _isLoggedIn = false;
   String _currentUser = ""; // e.g., "weasel" or "Otter"
-
   Timer? _heartbeatTimer;
 
   @override
   void initState() {
     super.initState();
-
+    // Set login state based on the persistent storage
+    if (widget.initialUser.isNotEmpty) {
+      _isLoggedIn = true;
+      _currentUser = widget.initialUser;
+    }
     // Start heartbeat checks every 5 seconds
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
       final ok = await ApiService.getHeartbeat();
@@ -89,14 +94,20 @@ class _MyTaskTrackerAppState extends State<MyTaskTrackerApp> {
     super.dispose();
   }
 
-  void _login(String username) {
+  // When login is successful, persist the username
+  Future<void> _login(String username) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('currentUser', username);
     setState(() {
       _isLoggedIn = true;
       _currentUser = username;
     });
   }
 
-  void _logout() {
+  // On logout, remove the stored username
+  Future<void> _logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('currentUser');
     setState(() {
       _isLoggedIn = false;
       _currentUser = "";

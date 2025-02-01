@@ -6,6 +6,8 @@ import 'package:flutter_tasktracker/models/stats_response.dart';
 import 'package:flutter_tasktracker/utils.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:flutter_tasktracker/screens/dashboard_screen.dart';
+import 'package:flutter_tasktracker/screens/personal_stats_screen.dart';
 
 // Data classes for intermediate chart logic
 class CompletionCountChart {
@@ -131,9 +133,7 @@ class _StatsScreenState extends State<StatsScreen> {
         taskCounts[title] = (taskCounts[title] ?? 0) + 1;
       }
     }
-    final tasksList = taskCounts.entries
-        .map((e) => TaskTypeCountChart(e.key, e.value))
-        .toList();
+    final tasksList = taskCounts.entries.map((e) => TaskTypeCountChart(e.key, e.value)).toList();
     tasksList.sort((a, b) => b.count.compareTo(a.count));
     final top5 = tasksList.take(5).toList();
     _mostCompletedBarGroups = _buildMostCompletedBarGroups(top5);
@@ -406,6 +406,20 @@ class _StatsScreenState extends State<StatsScreen> {
     );
   }
 
+  // ---------- NAVIGATION HELPER ----------
+  void _goToUserStats(String username) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PersonalStatsScreen(
+          username: username,
+          onLogout: widget.onLogout,
+        ),
+      ),
+    );
+  }
+
+  // ---------- BUILD (SINGLE BUILD METHOD) ----------
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -577,7 +591,7 @@ class _StatsScreenState extends State<StatsScreen> {
       elevation: 3,
       child: Container(
         padding: const EdgeInsets.all(16),
-        height: 300,
+        height: 320,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -592,19 +606,33 @@ class _StatsScreenState extends State<StatsScreen> {
                   titlesData: FlTitlesData(
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
-                        showTitles:
-                            labels != null && labels.isNotEmpty ? true : false,
+                        showTitles: labels != null && labels.isNotEmpty,
                         getTitlesWidget: (value, meta) {
                           final idx = value.toInt();
                           if (idx < 0 || idx >= (labels?.length ?? 0)) {
                             return Container();
                           }
-                          return Text(labels![idx]);
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8), // adds space below bars
+                            child: Text(
+                              labels![idx],
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          );
                         },
                       ),
                     ),
                     leftTitles: AxisTitles(
                       sideTitles: SideTitles(showTitles: true),
+                    ),
+                    topTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    rightTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
                     ),
                   ),
                 ),
@@ -624,7 +652,7 @@ class _StatsScreenState extends State<StatsScreen> {
       elevation: 3,
       child: Container(
         padding: const EdgeInsets.all(16),
-        height: 300,
+        height: 320,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -648,13 +676,27 @@ class _StatsScreenState extends State<StatsScreen> {
                       sideTitles: SideTitles(
                         showTitles: true,
                         getTitlesWidget: (value, meta) {
-                          final dayOffset = value.toInt();
-                          return Text(dayOffset.toString());
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              value.toInt().toString(),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          );
                         },
                       ),
                     ),
                     leftTitles: AxisTitles(
                       sideTitles: SideTitles(showTitles: true),
+                    ),
+                    topTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    rightTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
                     ),
                   ),
                 ),
@@ -674,7 +716,7 @@ class _StatsScreenState extends State<StatsScreen> {
       elevation: 3,
       child: Container(
         padding: const EdgeInsets.all(16),
-        height: 300,
+        height: 320,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -692,6 +734,12 @@ class _StatsScreenState extends State<StatsScreen> {
                     ),
                     leftTitles: AxisTitles(
                       sideTitles: SideTitles(showTitles: true),
+                    ),
+                    topTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    rightTitles: AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
                     ),
                   ),
                 ),

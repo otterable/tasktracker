@@ -39,8 +39,8 @@ android {
     signingConfigs {
         // Create a signing config for release builds
         create("release") {
-            // Replace the file path with the actual location of your release keystore.
-            storeFile = file("C:/Users/ottr/Documents/GitHub/tasktracker/frontend/tasktracker/android/molentracker-release.jks")
+            // Use a relative path because the keystore is in the "android" folder, not in "android/app"
+            storeFile = file("../molentracker-release.jks")
             // Replace these with your actual keystore and key passwords.
             storePassword = "moulin"
             keyAlias = "molentracker"
