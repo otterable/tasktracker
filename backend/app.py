@@ -14,7 +14,7 @@ import io
 import re
 import random
 from datetime import datetime, timedelta
-import requests  # for sending requests to FCM
+import requests  # Only used for non-FCM calls if needed
 
 # 1) Import and enable CORS
 from flask_cors import CORS
@@ -22,12 +22,18 @@ from flask_cors import CORS
 # 2) Import Twilio client
 from twilio.rest import Client
 
+# 3) Import Firebase Admin SDK modules
+import firebase_admin
+from firebase_admin import credentials, messaging
+
 app = Flask(__name__)
-app.secret_key = "my-very-strong-secret-key"  # Change to something secure
+app.secret_key = "my-very-strong-secret-key"  # Change this to something secure
 
 # Enable CORS for all routes
 CORS(app)
 
+# Use your live domain for production
+LIVE_BASE_URL = "https://molentracker.ermine.at"
 DATABASE = 'database.db'
 
 ######################### TWILIO CONFIGURATION #########################
@@ -35,25 +41,33 @@ TWILIO_ACCOUNT_SID = "ACc21e0ab649ebe0280c1cab26ebdb92be"
 TWILIO_AUTH_TOKEN = "4799cd1a4a179d21f1fc1083aab66736"
 TWILIO_FROM_NUMBER = "+14243294447"  # Your Twilio phone number
 
-# The phone->username mapping you want (leading '+' is recommended).
-# We'll store them in normalized form, but we handle user input with spaces, etc.
+# The phone->username mapping (ensure numbers are normalized)
 PHONE_TO_USERNAME = {
     "+436703596614": "otter",
     "+4369910503659": "weasel"
 }
 #######################################################################
 
-# We keep a dictionary in memory for OTP codes currently requested
-# key = normalized_phone, value = {"code": <6-digit>, "expires": <datetime>}
+# Dictionary to store OTP requests
 pending_otps = {}
 
-# For FCM push notifications: you'll need your own server key from Firebase
-FCM_SERVER_KEY = "YOUR_FIREBASE_SERVER_KEY_HERE"
+# ----- Firebase Admin Initialization ----- 
+# Replace the path below with the path to your downloaded service account JSON file.
+try:
+    cred = credentials.Certificate("path/to/your-service-account-file.json")
+    firebase_admin.initialize_app(cred)
+    log_msg = "Firebase Admin initialized successfully."
+except Exception as e:
+    log_msg = f"Error initializing Firebase Admin: {e}"
+print(f"[DEBUG] {log_msg}")
+
+# --- No longer need FCM_SERVER_KEY when using firebase_admin ---
+# FCM_SERVER_KEY = "YOUR_FIREBASE_SERVER_KEY_HERE"
 
 def normalize_phone(phone: str) -> str:
     """
     Remove all non-digit and non-plus characters.
-    Ensure that the string starts with '+' if missing.
+    Ensure the string starts with '+' if missing.
     """
     p = re.sub(r"[^0-9+]", "", phone)
     if not p.startswith('+'):
@@ -75,9 +89,9 @@ def send_otp_sms(phone: str, code: str):
             from_=TWILIO_FROM_NUMBER,
             to=phone
         )
-        log(f"Sent OTP {code} to phone={phone}, SID={message.sid}")
+        log(f"[send_otp_sms] Sent OTP {code} to phone={phone}, SID={message.sid}")
     except Exception as e:
-        log(f"Error sending OTP via Twilio: {e}")
+        log(f"[send_otp_sms] Error sending OTP via Twilio: {e}")
 
 def get_db_connection():
     conn = sqlite3.connect(DATABASE)
@@ -105,7 +119,6 @@ def time_taken(created_str, completed_str):
     secs = diff.seconds
     hours = secs // 3600
     minutes = (secs % 3600) // 60
-
     parts = []
     if days:
         parts.append(f"{days}d")
@@ -124,12 +137,10 @@ def to_datetime_filter(value):
 def init_db():
     """
     Initializes the database and inserts default tasks if empty.
-    We no longer create a 'users' table or default users.
     """
     log("Initializing database...")
     conn = get_db_connection()
     cursor = conn.cursor()
-
     # Create tasks table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS tasks (
@@ -143,7 +154,6 @@ def init_db():
             completed_on TEXT
         )
     ''')
-
     # Create device_tokens table for push notifications
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS device_tokens (
@@ -152,31 +162,29 @@ def init_db():
             token TEXT
         )
     ''')
-
-    # Create default tasks if none
+    # Insert default tasks if none exist
     cursor.execute('SELECT COUNT(*) as count FROM tasks')
     count_tasks = cursor.fetchone()['count']
     if count_tasks == 0:
-        log("No tasks found; inserting default tasks Wäsche, Küche, kochen.")
+        log("No tasks found; inserting default tasks: Wäsche, Küche, kochen.")
         now_str = datetime.utcnow().isoformat()
         cursor.execute("INSERT INTO tasks (title, creation_date) VALUES (?,?)", ("Wäsche", now_str))
         cursor.execute("INSERT INTO tasks (title, creation_date) VALUES (?,?)", ("Küche", now_str))
         cursor.execute("INSERT INTO tasks (title, creation_date) VALUES (?,?)", ("kochen", now_str))
         conn.commit()
-
     conn.close()
     log("Database init complete.")
 
 @app.route('/')
 def index():
     if 'username' in session:
-        log(f"Index called; user '{session['username']}' is logged in.")
+        log(f"Index: user '{session['username']}' is logged in.")
         return redirect(url_for('dashboard'))
     return render_template('index.html')
 
 @app.route('/logout')
 def logout():
-    log("Logout called; clearing session.")
+    log("Logout: Clearing session.")
     session.clear()
     return redirect(url_for('index'))
 
@@ -184,8 +192,7 @@ def logout():
 def dashboard():
     if 'username' not in session:
         return redirect(url_for('index'))
-
-    log(f"Dashboard called by user '{session['username']}'")
+    log(f"Dashboard: Called by user '{session['username']}'")
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM tasks WHERE completed=0")
@@ -193,7 +200,6 @@ def dashboard():
     cursor.execute("SELECT * FROM tasks WHERE completed=1")
     completed_tasks = cursor.fetchall()
     conn.close()
-
     today = datetime.now()
     calendar_days = [today + timedelta(days=i) for i in range(7)]
     return render_template(
@@ -208,15 +214,12 @@ def dashboard():
 def create_task():
     if 'username' not in session:
         return redirect(url_for('index'))
-
     title = request.form.get('title')
     duration_hours = request.form.get('duration', 48)
     assigned_to = request.form.get('assigned_to', None)
-    log(f"Creating task => title={title}, dur={duration_hours}, assigned_to={assigned_to}")
-
+    log(f"[create_task] Creating task: title={title}, duration_hours={duration_hours}, assigned_to={assigned_to}")
     creation_date = datetime.utcnow()
     due_date = creation_date + timedelta(hours=int(duration_hours))
-
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -225,29 +228,23 @@ def create_task():
     """, (title, assigned_to, creation_date.isoformat(), due_date.isoformat()))
     conn.commit()
     conn.close()
-
-    # If assigned, notify that user
+    # If the task is assigned, send a push notification and schedule reminders.
     if assigned_to:
-        # Send push notification
         send_push_notification_to_user(
             assigned_to,
             f"Neue Aufgabe: {title}",
             f"Fällig bis {due_date.isoformat()}"
         )
-        # Also schedule 24h/12h/6h/3h/2h/1h reminders
         schedule_reminders(title, assigned_to, creation_date, due_date)
-
     return redirect(url_for('dashboard'))
 
 @app.route('/finish_task/<int:task_id>', methods=['POST'])
 def finish_task(task_id):
     if 'username' not in session:
         return redirect(url_for('index'))
-
     finisher = session['username']
     now = datetime.utcnow()
-    log(f"Finishing task id={task_id}, completed_by={finisher}.")
-
+    log(f"[finish_task] Finishing task id={task_id}, completed_by={finisher}")
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -256,27 +253,21 @@ def finish_task(task_id):
         WHERE id=?
     """, (finisher, now.isoformat(), task_id))
     conn.commit()
-
-    # Fetch the task info
     cursor.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
     row = cursor.fetchone()
     conn.close()
-
     if row:
         title = row["title"]
-        # Send global notification => "Task title" completed by X
         send_push_notification_to_all(
             "Aufgabe erledigt",
             f"'{title}' abgeschlossen von {finisher} am {now.isoformat()}"
         )
-
     return redirect(url_for('dashboard'))
 
 @app.route('/stats')
 def stats():
     if 'username' not in session:
         return redirect(url_for('index'))
-
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -286,11 +277,9 @@ def stats():
         GROUP BY completed_by
     """)
     completions = cursor.fetchall()
-
     cursor.execute("SELECT * FROM tasks ORDER BY creation_date ASC")
     all_tasks = cursor.fetchall()
     conn.close()
-
     return render_template('stats.html', completions=completions, all_tasks=all_tasks)
 
 @app.route('/export_csv')
@@ -300,13 +289,11 @@ def export_csv():
     cursor.execute("SELECT * FROM tasks")
     rows = cursor.fetchall()
     conn.close()
-
     si = io.StringIO()
     cw = csv.writer(si)
-    cw.writerow(["id","title","assigned_to","creation_date","due_date","completed","completed_by","completed_on"])
+    cw.writerow(["id", "title", "assigned_to", "creation_date", "due_date", "completed", "completed_by", "completed_on"])
     for row in rows:
         cw.writerow(list(row))
-
     output = make_csv_response(si.getvalue(), "tasks.csv")
     return output
 
@@ -317,13 +304,11 @@ def export_xlsx():
     cursor.execute("SELECT * FROM tasks")
     rows = cursor.fetchall()
     conn.close()
-
     si = io.StringIO()
     cw = csv.writer(si)
-    cw.writerow(["id","title","assigned_to","creation_date","due_date","completed","completed_by","completed_on"])
+    cw.writerow(["id", "title", "assigned_to", "creation_date", "due_date", "completed", "completed_by", "completed_on"])
     for row in rows:
         cw.writerow(list(row))
-
     output = make_csv_response(si.getvalue(), "tasks.xlsx")
     return output
 
@@ -337,27 +322,23 @@ def make_csv_response(csv_string, filename):
 
 @app.route('/api/heartbeat', methods=['GET'])
 def api_heartbeat():
-    log("API GET /api/heartbeat called.")
+    log("[api/heartbeat] Called")
     return jsonify({"status": "ok"}), 200
 
 @app.route('/api/request_otp', methods=['POST'])
 def api_request_otp():
     data = request.get_json() or {}
     raw_phone = data.get("phone", "").strip()
-    log(f"API /api/request_otp => raw_phone={raw_phone}")
-
+    log(f"[api/request_otp] raw_phone={raw_phone}")
     if not raw_phone:
         return jsonify({"status": "error", "message": "No phone provided"}), 400
-
     phone = normalize_phone(raw_phone)
     if phone not in PHONE_TO_USERNAME:
         return jsonify({"status": "error", "message": "Phone not recognized"}), 404
-
     code = generate_otp_code()
     expires_at = datetime.utcnow() + timedelta(minutes=5)
     pending_otps[phone] = {"code": code, "expires": expires_at}
     send_otp_sms(phone, code)
-
     return jsonify({"status": "otp_sent"}), 200
 
 @app.route('/api/verify_otp', methods=['POST'])
@@ -367,11 +348,9 @@ def api_verify_otp():
     otp_code = data.get("otp_code", "").strip()
     if not raw_phone or not otp_code:
         return jsonify({"status": "error", "message": "Missing phone or otp_code"}), 400
-
     phone = normalize_phone(raw_phone)
     if phone not in PHONE_TO_USERNAME:
         return jsonify({"status": "error", "message": "Phone not recognized"}), 404
-
     entry = pending_otps.get(phone)
     if not entry:
         return jsonify({"status": "fail", "message": "No OTP pending"}), 401
@@ -380,7 +359,6 @@ def api_verify_otp():
         return jsonify({"status": "fail", "message": "OTP expired"}), 401
     if otp_code != entry["code"]:
         return jsonify({"status": "fail", "message": "Incorrect code"}), 401
-
     username = PHONE_TO_USERNAME[phone]
     session['username'] = username
     del pending_otps[phone]
@@ -393,7 +371,7 @@ def api_get_tasks():
     cursor.execute("SELECT * FROM tasks")
     rows = cursor.fetchall()
     conn.close()
-
+    log(f"[api/tasks] Found {len(rows)} tasks")
     tasks_list = []
     for row in rows:
         tasks_list.append({
@@ -413,15 +391,12 @@ def api_create_task():
     data = request.get_json()
     if not data or "title" not in data:
         return jsonify({"error": "Title is required"}), 400
-
     title = data["title"]
     duration_hours = data.get("duration_hours", 48)
     assigned_to = data.get("assigned_to", None)
-
     creation_date = datetime.utcnow()
     due_date = creation_date + timedelta(hours=int(duration_hours))
-    log(f"  Creating new task: title={title}, assigned_to={assigned_to}, due_in={duration_hours}h.")
-
+    log(f"[api/create_task] Creating new task: title={title}, assigned_to={assigned_to}, due_in={duration_hours}h")
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -429,12 +404,10 @@ def api_create_task():
         VALUES (?, ?, ?, ?)
     """, (title, assigned_to, creation_date.isoformat(), due_date.isoformat()))
     conn.commit()
-
     new_id = cursor.lastrowid
     cursor.execute("SELECT * FROM tasks WHERE id=?", (new_id,))
     row = cursor.fetchone()
     conn.close()
-
     created_task = {
         "id": row["id"],
         "title": row["title"],
@@ -445,9 +418,7 @@ def api_create_task():
         "completed_by": row["completed_by"],
         "completed_on": row["completed_on"]
     }
-    log(f"  Task created with id={new_id}.")
-
-    # If assigned, notify user
+    log(f"[api/create_task] Task created with id={new_id}")
     if assigned_to:
         send_push_notification_to_user(
             assigned_to,
@@ -455,7 +426,6 @@ def api_create_task():
             f"Fällig bis {due_date.isoformat()}"
         )
         schedule_reminders(title, assigned_to, creation_date, due_date)
-
     return jsonify(created_task), 201
 
 @app.route('/api/tasks/<int:task_id>/finish', methods=['POST'])
@@ -463,7 +433,6 @@ def api_finish_task(task_id):
     data = request.get_json(silent=True) or {}
     finisher = data.get("username", "Unknown")
     now = datetime.utcnow()
-
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -472,14 +441,11 @@ def api_finish_task(task_id):
         WHERE id=?
     """, (finisher, now.isoformat(), task_id))
     conn.commit()
-
     cursor.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
     row = cursor.fetchone()
     conn.close()
-
     if row is None:
         return jsonify({"error": "Task not found"}), 404
-
     updated_task = {
         "id": row["id"],
         "title": row["title"],
@@ -490,21 +456,17 @@ def api_finish_task(task_id):
         "completed_by": row["completed_by"],
         "completed_on": row["completed_on"]
     }
-    log(f"  Task {task_id} completed successfully by {finisher}.")
-
-    # Notify all devices => "Task completed"
+    log(f"[api/finish_task] Task {task_id} completed successfully by {finisher}")
     send_push_notification_to_all(
         "Aufgabe erledigt",
         f"'{row['title']}' abgeschlossen von {finisher} am {now.isoformat()}"
     )
-
     return jsonify(updated_task), 200
 
 @app.route('/api/stats', methods=['GET'])
 def api_stats():
     conn = get_db_connection()
     cursor = conn.cursor()
-
     cursor.execute("""
         SELECT completed_by, COUNT(*) as total_completed
         FROM tasks
@@ -512,7 +474,6 @@ def api_stats():
         GROUP BY completed_by
     """)
     completions_rows = cursor.fetchall()
-
     completions_list = []
     for row in completions_rows:
         completed_by = row["completed_by"] if row["completed_by"] else ""
@@ -520,11 +481,9 @@ def api_stats():
             "completed_by": completed_by,
             "total_completed": row["total_completed"]
         })
-
     cursor.execute("SELECT * FROM tasks ORDER BY creation_date ASC")
     all_rows = cursor.fetchall()
     conn.close()
-
     all_tasks_list = []
     for r in all_rows:
         all_tasks_list.append({
@@ -537,60 +496,53 @@ def api_stats():
             "completed_by": r["completed_by"],
             "completed_on": r["completed_on"]
         })
-
     result = {
         "completions": completions_list,
         "all_tasks": all_tasks_list
     }
     return jsonify(result), 200
 
-# Register device token => store in DB
+# Endpoint to register device token for push notifications
 @app.route('/api/register_token', methods=['POST'])
 def register_token():
     """
     Expects JSON: { "token": "...", "username": "..." }
-    Stores or updates the device token for the user in 'device_tokens'.
+    Stores or updates the device token for the user.
     """
     data = request.get_json(silent=True) or {}
     token = data.get("token", "").strip()
     username = data.get("username", "").strip()
     if not token or not username:
         return jsonify({"error": "Missing token or username"}), 400
-
-    log(f"register_token => user={username}, token={token}")
+    log(f"[register_token] Received token for user {username}: {token}")
     conn = get_db_connection()
     cursor = conn.cursor()
-
-    # Check if already stored
     cursor.execute("SELECT * FROM device_tokens WHERE username=? AND token=?", (username, token))
     row = cursor.fetchone()
     if row:
-        log("Token already exists. No change.")
+        log("[register_token] Token already exists. No change.")
     else:
-        # Insert new
         cursor.execute("INSERT INTO device_tokens (username, token) VALUES (?,?)", (username, token))
         conn.commit()
-
+        log("[register_token] New token stored.")
     conn.close()
     return jsonify({"status": "ok"}), 200
 
 def schedule_reminders(task_title, assigned_user, creation_date, due_date):
     """
-    Schedules reminders at 24h,12h,6h,3h,2h,1h before 'due_date'
-    In real usage, you'd do a background job or cron.
-    For demonstration, we just log them.
+    Schedules reminders at 24h, 12h, 6h, 3h, 2h, and 1h before due_date.
+    In production, store these in a database and process with a background job.
+    Here we simply log the scheduled times.
     """
-    # We'll just compute the times in UTC, store them, etc.
-    # In real usage, you'd store in a 'reminders' table and have a cron check them.
-    intervals = [24, 12, 6, 3, 2, 1]  # hours
+    intervals = [24, 12, 6, 3, 2, 1]  # in hours
     for h in intervals:
         remind_time = due_date - timedelta(hours=h)
-        log(f"Scheduling reminder: {task_title} -> user={assigned_user}, at {remind_time.isoformat()}")
-        # In a real system, you'd store in DB and have a cron or celery to check.
+        log(f"[schedule_reminders] Scheduled reminder for task '{task_title}' for user {assigned_user} at {remind_time.isoformat()}")
 
 def send_push_notification_to_user(username, title, body):
     """
-    Looks up device tokens for the given username, sends an FCM push.
+    Looks up device tokens for the given username and sends an FCM push notification.
+    Uses the Firebase Admin SDK.
     """
     if not username:
         return
@@ -599,51 +551,43 @@ def send_push_notification_to_user(username, title, body):
     cursor.execute("SELECT token FROM device_tokens WHERE username=?", (username,))
     tokens = [row["token"] for row in cursor.fetchall()]
     conn.close()
+    log(f"[send_push_notification_to_user] Found {len(tokens)} token(s) for user {username}")
     for t in tokens:
         _send_fcm_push(t, title, body)
 
 def send_push_notification_to_all(title, body):
     """
-    Sends a push notification to ALL known device tokens.
+    Sends an FCM push notification to all stored device tokens.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT token FROM device_tokens")
     tokens = [row["token"] for row in cursor.fetchall()]
     conn.close()
-
+    log(f"[send_push_notification_to_all] Found {len(tokens)} total token(s)")
     for t in tokens:
         _send_fcm_push(t, title, body)
 
 def _send_fcm_push(token, title, body):
     """
-    Actually do the POST to FCM with the server key.
+    Sends a push notification using the Firebase Admin SDK.
     """
-    if not FCM_SERVER_KEY or FCM_SERVER_KEY.startswith("YOUR_"):
-        log("FCM_SERVER_KEY is missing or placeholder. Skipping actual push.")
-        return
-
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"key={FCM_SERVER_KEY}"
-    }
-    payload = {
-        "to": token,
-        "notification": {
-            "title": title,
-            "body": body,
-            "sound": "default",
-        },
-        "data": {
-            "click_action": "FLUTTER_NOTIFICATION_CLICK",
-            "extra": "some_data_here"
-        }
-    }
     try:
-        resp = requests.post("https://fcm.googleapis.com/fcm/send", headers=headers, json=payload)
-        log(f"FCM push => status {resp.status_code}, resp={resp.text}")
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title=title,
+                body=body,
+            ),
+            token=token,
+            data={
+                "click_action": "FLUTTER_NOTIFICATION_CLICK",
+                "extra": "some_data_here"
+            },
+        )
+        response = messaging.send(message)
+        log(f"[_send_fcm_push] Successfully sent message: {response}")
     except Exception as e:
-        log(f"Error sending FCM push => {e}")
+        log(f"[_send_fcm_push] Error sending message: {e}")
 
 init_db()
 

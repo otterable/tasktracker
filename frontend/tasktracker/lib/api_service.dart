@@ -8,7 +8,8 @@ import 'package:flutter_tasktracker/models/task.dart';
 import 'package:flutter_tasktracker/models/stats_response.dart';
 
 class ApiService {
-  static const String baseUrl = "http://localhost:5444";
+  // Update the base URL for production (use HTTPS)
+  static const String baseUrl = "https://molentracker.ermine.at";
 
   /// -----------------------
   ///  PHONE-based OTP login
@@ -65,7 +66,7 @@ class ApiService {
   }
 
   static Future<Task> createTask(String title, int durationHours, String? assignedTo) async {
-    debugPrint("[ApiService] POST /api/tasks => $title $durationHours $assignedTo");
+    debugPrint("[ApiService] POST /api/tasks => title=$title, durationHours=$durationHours, assignedTo=$assignedTo");
     final bodyData = {
       "title": title,
       "duration_hours": durationHours,
@@ -86,7 +87,7 @@ class ApiService {
   }
 
   static Future<Task> finishTask(int id, String finisher) async {
-    debugPrint("[ApiService] POST /api/tasks/$id/finish => $finisher");
+    debugPrint("[ApiService] POST /api/tasks/$id/finish => finisher=$finisher");
     final response = await http.post(
       Uri.parse("$baseUrl/api/tasks/$id/finish"),
       headers: {"Content-Type": "application/json"},
@@ -124,24 +125,22 @@ class ApiService {
     return false;
   }
 
-  // CSV / XLSX
+  // CSV / XLSX export URLs
   static String getCsvExportUrl() => "$baseUrl/export_csv";
   static String getXlsxExportUrl() => "$baseUrl/export_xlsx";
 
   /// -----------------------
   ///  Push Notifications
   /// -----------------------
-  /// Flutter side: store the device token from Firebase Cloud Messaging
-  /// on the server so it can send push notifications even if app is closed
+  /// Register the device token (from FCM) with your server.
   static Future<void> sendDeviceTokenToServer(String token, String username) async {
-    debugPrint("[ApiService] sendDeviceTokenToServer => token=$token, user=$username");
+    debugPrint("[ApiService] sendDeviceTokenToServer => token=$token, username=$username");
     final bodyData = {"token": token, "username": username};
     final response = await http.post(
       Uri.parse("$baseUrl/api/register_token"),
       headers: {"Content-Type": "application/json"},
       body: json.encode(bodyData),
     );
-    debugPrint("[ApiService] register_token => code ${response.statusCode}");
-    // no special return needed
+    debugPrint("[ApiService] register_token response code: ${response.statusCode}");
   }
 }

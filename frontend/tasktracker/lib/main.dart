@@ -20,7 +20,7 @@ Future<void> _initNotifications() async {
   // Android initialization
   const AndroidInitializationSettings initializationSettingsAndroid =
       AndroidInitializationSettings('@mipmap/ic_launcher');
-  // Ensure you have a corresponding ic_launcher in the mipmap folders
+  // Ensure that you have an icon named ic_launcher in your mipmap folders
 
   // iOS initialization
   final DarwinInitializationSettings initializationSettingsIOS =
@@ -35,7 +35,7 @@ Future<void> _initNotifications() async {
   await flutterLocalNotificationsPlugin.initialize(
     initializationSettings,
     onDidReceiveNotificationResponse: (response) {
-      // handle notification tap or action here if desired
+      // Handle notification tap or action here if desired
     },
   );
 }
@@ -49,7 +49,7 @@ void main() async {
   // 3) Initialize local notifications
   await _initNotifications();
 
-  // If desired, restrict orientation:
+  // Optionally restrict orientation (uncomment if needed):
   // await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
   runApp(const MyTaskTrackerApp());
@@ -64,7 +64,7 @@ class MyTaskTrackerApp extends StatefulWidget {
 
 class _MyTaskTrackerAppState extends State<MyTaskTrackerApp> {
   bool _isLoggedIn = false;
-  String _currentUser = ""; // e.g. "weasel" or "Otter"
+  String _currentUser = ""; // e.g., "weasel" or "Otter"
 
   Timer? _heartbeatTimer;
 
@@ -126,8 +126,8 @@ class _MyTaskTrackerAppState extends State<MyTaskTrackerApp> {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          foregroundColor: Colors.white,
-          backgroundColor: const Color(0xFFFF5C00),
+          foregroundColor: Colors.white, // button text color
+          backgroundColor: const Color(0xFFFF5C00), // orange
           textStyle: const TextStyle(
             fontFamily: 'Roboto',
             fontWeight: FontWeight.bold,
@@ -138,7 +138,6 @@ class _MyTaskTrackerAppState extends State<MyTaskTrackerApp> {
     );
 
     return MaterialApp(
-      // Updated to "Molentracker" if you want that as the displayed title
       title: 'Molentracker',
       theme: theme,
       home: _isLoggedIn

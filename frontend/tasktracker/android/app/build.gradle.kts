@@ -3,7 +3,7 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-    // Add the Google services Gradle plugin so that google-services.json is processed.
+    // Apply the Google services plugin to process google-services.json.
     id("com.google.gms.google-services")
 }
 
@@ -23,7 +23,7 @@ android {
     }
 
     defaultConfig {
-        // Set the applicationId to "com.molentracker"
+        // The applicationId is set to "com.molentracker" per your request.
         applicationId = "com.molentracker"
         // Use the Flutter-provided values:
         minSdk = flutter.minSdkVersion
@@ -32,10 +32,24 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        release {
+            // Replace the file path with the actual location of your release keystore.
+            storeFile = file("C:/Users/ottr/molentracker-release.jks")
+            // Replace these with your actual keystore and key passwords.
+            storePassword = "your_store_password"
+            keyAlias = "molentracker"
+            keyPassword = "your_key_password"
+        }
+    }
+
     buildTypes {
         release {
-            // Using the debug signing config for now (so that 'flutter run --release' works)
-            signingConfig = signingConfigs.getByName("debug")
+            // Use the release signing config for release builds.
+            signingConfig = signingConfigs.release
+            // Optionally, enable code shrinking and obfuscation with ProGuard:
+            // isMinifyEnabled = true
+            // proguardFiles(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro")
         }
     }
 }
