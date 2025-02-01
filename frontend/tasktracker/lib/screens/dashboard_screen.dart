@@ -2,7 +2,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-
 import 'package:flutter_tasktracker/api_service.dart';
 import 'package:flutter_tasktracker/models/task.dart';
 import 'package:flutter_tasktracker/screens/personal_stats_screen.dart';
@@ -53,7 +52,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   ];
   String _selectedCompletedRange = "Letzte 7 Tage";
 
-  // Bottom bar index
+  // Bottom bar index (Dashboard is index 0)
   int _selectedBottomIndex = 0;
 
   @override
@@ -76,35 +75,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ================= NOTIFICATIONS =================
   void _scheduleNotifications(Task task, String action) async {
-    // This is a demonstration of local notifications usage.
     if (action == "new" && task.assignedTo != null) {
       final body = "Neue Aufgabe '${task.title}' zugewiesen an ${task.assignedTo!}";
-      NotificationService.showNotification(
-        title: "Neue Aufgabe",
-        body: body,
-      );
+      NotificationService.showNotification(title: "Neue Aufgabe", body: body);
     } else if (action == "completed") {
       final body = "Aufgabe '${task.title}' erledigt von ${task.completedBy}";
-      NotificationService.showNotification(
-        title: "Aufgabe erledigt",
-        body: body,
-      );
+      NotificationService.showNotification(title: "Aufgabe erledigt", body: body);
     } else if (action == "edited") {
       NotificationService.showNotification(
-        title: "Aufgabe geändert",
-        body: "Die Aufgabe '${task.title}' wurde bearbeitet.",
-      );
+          title: "Aufgabe geändert", body: "Die Aufgabe '${task.title}' wurde bearbeitet.");
     } else if (action == "resend") {
-      NotificationService.showNotification(
-        title: "Benachr. erneut gesendet",
-        body: "Aufgabe: ${task.title}",
-      );
+      NotificationService.showNotification(title: "Benachr. erneut gesendet", body: "Aufgabe: ${task.title}");
     }
   }
 
   // ================= NEW TASK =================
   void _showNewTaskDialog() {
-    // Reset fields
     _selectedTitle = "Wäsche";
     _customTitleController.clear();
     _selectedDuration = 48;
@@ -119,7 +105,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Aufgabe
+                // Aufgabe dropdown
                 Row(
                   children: [
                     const Text("Aufgabe: ", style: TextStyle(fontWeight: FontWeight.bold)),
@@ -133,7 +119,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         );
                       }).toList(),
                       onChanged: (val) {
-                        setState(() => _selectedTitle = val ?? "Wäsche");
+                        setState(() {
+                          _selectedTitle = val ?? "Wäsche";
+                        });
                       },
                     ),
                   ],
@@ -146,7 +134,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ],
                 const SizedBox(height: 16),
-                // Dauer
+                // Duration dropdown
                 Row(
                   children: [
                     const Text("Dauer (h): ", style: TextStyle(fontWeight: FontWeight.bold)),
@@ -160,13 +148,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         );
                       }).toList(),
                       onChanged: (val) {
-                        setState(() => _selectedDuration = val ?? 48);
+                        setState(() {
+                          _selectedDuration = val ?? 48;
+                        });
                       },
                     ),
                   ],
                 ),
                 const SizedBox(height: 16),
-                // Zuweisen an
+                // Assigned-to dropdown
                 Row(
                   children: [
                     const Text("Zuweisen an: ", style: TextStyle(fontWeight: FontWeight.bold)),
@@ -181,7 +171,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         );
                       }).toList(),
                       onChanged: (val) {
-                        setState(() => _assignedTo = val);
+                        setState(() {
+                          _assignedTo = val;
+                        });
                       },
                     ),
                   ],
@@ -321,7 +313,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // ReAssign
               Row(
                 children: [
                   const Text("Zuweisen an:", style: TextStyle(fontWeight: FontWeight.bold)),
@@ -345,7 +336,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
               const SizedBox(height: 10),
-              // Change deadline
               Row(
                 children: [
                   const Text("Neue Dauer:", style: TextStyle(fontWeight: FontWeight.bold)),
@@ -368,7 +358,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
               const SizedBox(height: 10),
-              // Change category
               Row(
                 children: [
                   const Text("Kategorie:", style: TextStyle(fontWeight: FontWeight.bold)),
@@ -1271,7 +1260,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             label: "Dashboard",
             onTapOverride: () {
               if (_selectedBottomIndex != 0) {
-                setState(() => _selectedBottomIndex = 0);
+                setState(() {
+                  _selectedBottomIndex = 0;
+                });
               }
             },
           ),
@@ -1280,10 +1271,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: Icons.bar_chart,
             label: "Statistiken",
             onTapOverride: () {
-              setState(() => _selectedBottomIndex = 1);
+              setState(() {
+                _selectedBottomIndex = 1;
+              });
               Navigator.pushReplacement(
                 context,
-                MaterialPageRoute(builder: (_) => const StatsScreen()),
+                MaterialPageRoute(
+                  builder: (_) => StatsScreen(
+                    currentUser: widget.currentUser,
+                    onLogout: widget.onLogout,
+                  ),
+                ),
               );
             },
           ),
@@ -1292,11 +1290,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: Icons.person,
             label: "Pers. Stats",
             onTapOverride: () {
-              setState(() => _selectedBottomIndex = 2);
+              setState(() {
+                _selectedBottomIndex = 2;
+              });
               Navigator.pushReplacement(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => PersonalStatsScreen(username: widget.currentUser),
+                  builder: (_) => PersonalStatsScreen(
+                    username: widget.currentUser,
+                    onLogout: widget.onLogout,
+                  ),
                 ),
               );
             },
@@ -1341,7 +1344,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void _goToUserStats(String username) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => PersonalStatsScreen(username: username)),
+      MaterialPageRoute(
+        builder: (_) => PersonalStatsScreen(
+          username: username,
+          onLogout: widget.onLogout,
+        ),
+      ),
     );
   }
 

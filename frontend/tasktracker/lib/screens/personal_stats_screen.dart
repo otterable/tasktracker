@@ -1,16 +1,17 @@
 // lib/screens/personal_stats_screen.dart
+
 import 'package:flutter/material.dart';
+import 'package:flutter_tasktracker/widgets/custom_bottom_bar.dart';
 
 class PersonalStatsScreen extends StatelessWidget {
   final String username;
+  final VoidCallback onLogout;
 
-  const PersonalStatsScreen({Key? key, required this.username}) : super(key: key);
+  const PersonalStatsScreen({Key? key, required this.username, required this.onLogout}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    // Real logic: fetch tasks for 'username', compute stats, etc.
-    // Just placeholders:
-
+    // Placeholder data
     final totalDone = 12;
     final avgTime = "10h";
     final favoriteTask = "Küche";
@@ -21,6 +22,11 @@ class PersonalStatsScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text("Statistiken für $username"),
+      ),
+      bottomNavigationBar: CustomBottomBar(
+        selectedIndex: 2,
+        currentUser: username,
+        onLogout: onLogout,
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),

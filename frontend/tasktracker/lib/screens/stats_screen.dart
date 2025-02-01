@@ -5,8 +5,6 @@ import 'package:flutter_tasktracker/api_service.dart';
 import 'package:flutter_tasktracker/models/stats_response.dart';
 import 'package:flutter_tasktracker/utils.dart';
 import 'package:url_launcher/url_launcher.dart';
-
-// 1) Import fl_chart
 import 'package:fl_chart/fl_chart.dart';
 
 // Data classes for intermediate chart logic
@@ -46,8 +44,12 @@ class MultiLineActivity {
   MultiLineActivity(this.date, this.value);
 }
 
+// Updated StatsScreen now accepts currentUser and onLogout so it can pass them to the bottom bar.
 class StatsScreen extends StatefulWidget {
-  const StatsScreen({Key? key}) : super(key: key);
+  final String currentUser;
+  final VoidCallback onLogout;
+  const StatsScreen({Key? key, required this.currentUser, required this.onLogout})
+      : super(key: key);
 
   @override
   State<StatsScreen> createState() => _StatsScreenState();
@@ -57,7 +59,7 @@ class _StatsScreenState extends State<StatsScreen> {
   bool _loading = false;
   StatsResponse? _stats;
 
-  /// We place the old “Zeitraum” stuff here:
+  /// Zeitraum (range) dropdown values.
   final List<String> _statRanges = [
     "Letzte 7 Tage",
     "Seit Montag",
@@ -67,13 +69,17 @@ class _StatsScreenState extends State<StatsScreen> {
   ];
   String _selectedStatRange = "Letzte 7 Tage";
 
-  // We'll store final chart data in these:
+  // Chart data variables
   List<PieChartSectionData> _pieSections = [];
   List<BarChartGroupData> _avgTimeBarGroups = [];
   List<BarChartGroupData> _mostCompletedBarGroups = [];
   List<FlSpot> _tasksOverTimeSpots = []; // single line
   List<BarChartGroupData> _dayOfWeekBarGroups = [];
   List<LineChartBarData> _multiLineBarData = []; // multi-line
+
+  // The selected bottom bar index.
+  // For StatsScreen, we want the "Statistiken" tab (index 1) to be highlighted.
+  int _selectedBottomIndex = 1;
 
   @override
   void initState() {
@@ -86,8 +92,6 @@ class _StatsScreenState extends State<StatsScreen> {
     try {
       final resp = await ApiService.getStats();
       setState(() => _stats = resp);
-
-      // Build chart data from that stats response
       _buildCharts(resp);
     } catch (e) {
       debugPrint("Error fetching stats: $e");
@@ -104,7 +108,7 @@ class _StatsScreenState extends State<StatsScreen> {
   }
 
   void _buildCharts(StatsResponse resp) {
-    // 1) Pie Chart: who completed how many tasks
+    // 1) Pie Chart: Who completed how many tasks
     final completions = <CompletionCountChart>[];
     for (var c in resp.completions) {
       final user = c.completedBy.isEmpty ? "Unbekannt" : c.completedBy;
@@ -112,15 +116,14 @@ class _StatsScreenState extends State<StatsScreen> {
     }
     _pieSections = _buildPieSections(completions);
 
-    // 2) Bar Chart: average completion times
+    // 2) Bar Chart: Average completion times (example data)
     final avgTimeData = <CompletionTimeChart>[
-      // Example data
       CompletionTimeChart("Wiesel", 12),
       CompletionTimeChart("Otter", 9),
     ];
     _avgTimeBarGroups = _buildAvgTimeBarGroups(avgTimeData);
 
-    // 3) Bar Chart: most completed tasks
+    // 3) Bar Chart: Most completed tasks
     final Map<String, int> taskCounts = {};
     for (var t in resp.allTasksRaw) {
       if (t["completed"] == 1) {
@@ -128,22 +131,24 @@ class _StatsScreenState extends State<StatsScreen> {
         taskCounts[title] = (taskCounts[title] ?? 0) + 1;
       }
     }
-    final tasksList = taskCounts.entries.map((e) => TaskTypeCountChart(e.key, e.value)).toList();
+    final tasksList = taskCounts.entries
+        .map((e) => TaskTypeCountChart(e.key, e.value))
+        .toList();
     tasksList.sort((a, b) => b.count.compareTo(a.count));
     final top5 = tasksList.take(5).toList();
     _mostCompletedBarGroups = _buildMostCompletedBarGroups(top5);
 
-    // 4) Single line: tasks over time
+    // 4) Single line: Tasks over time (dummy data)
     final now = DateTime.now();
     final tasksOverTimeData = <TasksOverTime>[];
     for (int i = 6; i >= 0; i--) {
       final day = now.subtract(Duration(days: i));
-      final count = (i * 2) + 1; // dummy data
+      final count = (i * 2) + 1;
       tasksOverTimeData.add(TasksOverTime(day, count));
     }
     _tasksOverTimeSpots = _buildLineSpots(tasksOverTimeData);
 
-    // 5) tasks per day-of-week
+    // 5) Bar Chart: Tasks per day-of-week (dummy data)
     final dayOfWeekData = <DayOfWeekCountChart>[
       DayOfWeekCountChart("Mo", 3),
       DayOfWeekCountChart("Di", 5),
@@ -311,17 +316,109 @@ class _StatsScreenState extends State<StatsScreen> {
     return [wieselLine, otterLine];
   }
 
+  // ---------- BOTTOM BAR ----------
+  Widget _buildBottomBar() {
+    return Container(
+      height: 60,
+      color: Colors.white,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildBottomBarItem(
+            index: 0,
+            icon: Icons.dashboard,
+            label: "Dashboard",
+            onTapOverride: () {
+              setState(() {
+                _selectedBottomIndex = 0;
+              });
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => DashboardScreen(
+                    currentUser: widget.currentUser,
+                    onLogout: widget.onLogout,
+                  ),
+                ),
+              );
+            },
+          ),
+          _buildBottomBarItem(
+            index: 1,
+            icon: Icons.bar_chart,
+            label: "Statistiken",
+            onTapOverride: () {
+              // Already on StatsScreen; do nothing.
+            },
+          ),
+          _buildBottomBarItem(
+            index: 2,
+            icon: Icons.person,
+            label: "Pers. Stats",
+            onTapOverride: () {
+              setState(() {
+                _selectedBottomIndex = 2;
+              });
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PersonalStatsScreen(
+                    username: widget.currentUser,
+                    onLogout: widget.onLogout,
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomBarItem({
+    required int index,
+    required IconData icon,
+    required String label,
+    required VoidCallback onTapOverride,
+  }) {
+    final bool isSelected = (_selectedBottomIndex == index);
+    return InkWell(
+      onTap: onTapOverride,
+      child: Container(
+        width: 80,
+        color: isSelected ? Colors.grey.shade300 : Colors.white,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 28, color: Colors.black87),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: isSelected ? FontWeight.w900 : FontWeight.w700,
+                color: const Color(0xFF111111),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
       return Scaffold(
         appBar: AppBar(title: const Text("Statistiken")),
+        bottomNavigationBar: _buildBottomBar(),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
     if (_stats == null) {
       return Scaffold(
         appBar: AppBar(title: const Text("Statistiken")),
+        bottomNavigationBar: _buildBottomBar(),
         body: const Center(child: Text("No stats loaded.")),
       );
     }
@@ -330,11 +427,12 @@ class _StatsScreenState extends State<StatsScreen> {
       appBar: AppBar(
         title: const Text("Statistiken (fl_chart)"),
       ),
+      bottomNavigationBar: _buildBottomBar(),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // 1) The “Zeitraum” section from old Dashboard
+            // 1) Zeitraum section (old Dashboard style)
             Card(
               elevation: 4,
               child: Padding(
@@ -384,12 +482,10 @@ class _StatsScreenState extends State<StatsScreen> {
                 ),
               ),
             ),
-
             const SizedBox(height: 16),
             // 2) Who completed how many
             _buildCompletionCountsCard(),
             const SizedBox(height: 16),
-
             // 3) Bar chart for average time
             _buildBarChartCard(
               title: "Durchschnittliche Erledigungszeit (Stunden)",
@@ -397,7 +493,6 @@ class _StatsScreenState extends State<StatsScreen> {
               labels: ["Wiesel", "Otter"],
             ),
             const SizedBox(height: 16),
-
             // 4) Bar chart for most completed tasks
             _buildBarChartCard(
               title: "Meistabgeschlossene Aufgaben (Top 5)",
@@ -405,29 +500,25 @@ class _StatsScreenState extends State<StatsScreen> {
               labels: _mostCompletedBarGroups.map((_) => "").toList(),
             ),
             const SizedBox(height: 16),
-
             // 5) Single line chart
             _buildLineChartCard(
               title: "Abgeschlossene Aufgaben über Zeit",
               spots: _tasksOverTimeSpots,
             ),
             const SizedBox(height: 16),
-
-            // 6) day-of-week
+            // 6) Day-of-week bar chart
             _buildBarChartCard(
               title: "Aufgaben pro Wochentag",
               barGroups: _dayOfWeekBarGroups,
               labels: ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
             ),
             const SizedBox(height: 16),
-
-            // 7) multi-line
+            // 7) Multi-line chart
             _buildMultiLineChartCard(
               title: "Mehrlinien-Vergleich (Wiesel vs Otter)",
               lines: _multiLineBarData,
             ),
             const SizedBox(height: 16),
-
             ElevatedButton(
               onPressed: () => _launchUrl(ApiService.getCsvExportUrl()),
               child: const Text("Export as CSV"),
@@ -441,6 +532,8 @@ class _StatsScreenState extends State<StatsScreen> {
       ),
     );
   }
+
+  // ---------- Helper Widgets ----------
 
   Widget _buildCompletionCountsCard() {
     if (_stats!.completions.isEmpty) {
@@ -475,7 +568,6 @@ class _StatsScreenState extends State<StatsScreen> {
     );
   }
 
-  // Basic bar chart card
   Widget _buildBarChartCard({
     required String title,
     required List<BarChartGroupData> barGroups,
@@ -489,7 +581,9 @@ class _StatsScreenState extends State<StatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(title,
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Expanded(
               child: BarChart(
@@ -498,7 +592,8 @@ class _StatsScreenState extends State<StatsScreen> {
                   titlesData: FlTitlesData(
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
-                        showTitles: labels != null && labels.isNotEmpty,
+                        showTitles:
+                            labels != null && labels.isNotEmpty ? true : false,
                         getTitlesWidget: (value, meta) {
                           final idx = value.toInt();
                           if (idx < 0 || idx >= (labels?.length ?? 0)) {
@@ -521,7 +616,6 @@ class _StatsScreenState extends State<StatsScreen> {
     );
   }
 
-  // Single line chart
   Widget _buildLineChartCard({
     required String title,
     required List<FlSpot> spots,
@@ -534,7 +628,9 @@ class _StatsScreenState extends State<StatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(title,
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Expanded(
               child: LineChart(
@@ -570,7 +666,6 @@ class _StatsScreenState extends State<StatsScreen> {
     );
   }
 
-  // Multi-line chart
   Widget _buildMultiLineChartCard({
     required String title,
     required List<LineChartBarData> lines,
@@ -583,7 +678,9 @@ class _StatsScreenState extends State<StatsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(title,
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Expanded(
               child: LineChart(
