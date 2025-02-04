@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Manage Users</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    header { background-color: #003056; color: white; padding: 10px; }
+    nav a { margin-right: 15px; text-decoration: none; color: #FFD700; font-weight: bold; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { padding: 10px; border: 1px solid #ccc; text-align: left; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Registered Users</h1>
+    <p>Welcome, {{ session['username'] }} | <a href="{{ url_for('logout') }}">Logout</a></p>
+  </header>
+  <nav>
+    <a href="{{ url_for('dashboard') }}">Overview</a>
+    <a href="{{ url_for('dashboard_tasks') }}">Tasks</a>
+    <a href="{{ url_for('dashboard_projects') }}">Projects</a>
+    <a href="{{ url_for('dashboard_users') }}">Users</a>
+    <a href="{{ url_for('dashboard_notifications') }}">Notifications</a>
+    <a href="{{ url_for('dashboard_export') }}">Exports</a>
+  </nav>
+  <section>
+    <h2>All Users</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Username</th>
+          <th>Phone</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        <tr>
+          <td>{{ user["id"] }}</td>
+          <td>{{ user["username"] }}</td>
+          <td>{{ user["phone"] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</body>
+</html>

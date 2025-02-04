@@ -15,16 +15,25 @@ dependencies:
   url_launcher: ^6.1.9
   flutter_local_notifications: ^18.0.1
   fl_chart: ^0.70.2
-  firebase_core: ^3.10.1   # Use latest if available
-  firebase_messaging: ^15.2.1   # Use latest if available
+  firebase_core: ^3.10.1
+  firebase_messaging: ^15.2.1
   shared_preferences: ^2.0.15
+  firebase_crashlytics: 4.3.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_launcher_icons: ^0.10.0
 
 flutter:
   uses-material-design: true
 
   assets:
     - assets/molen.png
+    - assets/logo.png
+
+# Add this flutter_icons section at the bottom:
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo.png"

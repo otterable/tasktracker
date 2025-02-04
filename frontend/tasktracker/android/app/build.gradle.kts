@@ -1,3 +1,4 @@
+// android\app\build.gradle.kts
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -37,11 +38,20 @@ android {
     }
 
     signingConfigs {
-        // Create a signing config for release builds
+        // Instead of creating a new "debug" config, override the default debug signing config.
+        getByName("debug").apply {
+            // Since your debug keystore is located at android\my_debug.keystore
+            storeFile = file("../my_debug.keystore")
+            // Replace these with your actual debug keystore password and alias.
+            storePassword = "moulin"
+            keyAlias = "debug_alias"
+            keyPassword = "moulin"
+        }
+        // Create the release signing config.
         create("release") {
-            // Use a relative path because the keystore is in the "android" folder, not in "android/app"
+            // Using a relative path because your release keystore is in the "android" folder.
             storeFile = file("../molentracker-release.jks")
-            // Replace these with your actual keystore and key passwords.
+            // Replace these with your actual release keystore and key passwords.
             storePassword = "moulin"
             keyAlias = "molentracker"
             keyPassword = "moulin"
@@ -49,10 +59,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
-            // Use the release signing config created above.
             signingConfig = signingConfigs.getByName("release")
-            // Optionally, enable code shrinking and obfuscation with ProGuard:
+            // Optionally, enable code shrinking and obfuscation:
             // isMinifyEnabled = true
             // proguardFiles(getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro")
         }

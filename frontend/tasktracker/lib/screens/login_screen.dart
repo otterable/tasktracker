@@ -1,7 +1,9 @@
-// lib/screens/login_screen.dart, do not remove this line!
+// lib\screens\login_screen.dart, do not remove this line!
 
 import 'package:flutter/material.dart';
 import 'package:flutter_tasktracker/api_service.dart';
+// NEW: Import the registration screen
+import 'package:flutter_tasktracker/screens/registration_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final Function(String) onLoginSuccess;
@@ -48,35 +50,41 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _errorMessage = "Bitte sowohl Telefonnummer als auch Code eingeben.");
       return;
     }
-    final username = await ApiService.verifyOtp(phone, code);
-    if (username != null) {
-      widget.onLoginSuccess(username);
+    final result = await ApiService.verifyOtp(phone, code);
+    if (result == null) {
+      setState(() => _errorMessage = "Fehler beim Prüfen des Codes.");
+      return;
+    }
+    if (result["status"] == "ok") {
+      widget.onLoginSuccess(result["username"]);
+    } else if (result["status"] == "registration_required") {
+      // Navigate to the registration screen
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => RegistrationScreen(phone: phone)),
+      );
     } else {
-      setState(() => _errorMessage = "Code oder Telefonnummer ungültig.");
+      setState(() => _errorMessage = result["message"] ?? "Unbekannter Fehler");
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Keep your app bar if you wish
       appBar: AppBar(
         title: const Text("Molentracker"),
       ),
       body: Container(
-        // 1) Full background image
         decoration: const BoxDecoration(
           image: DecorationImage(
             image: AssetImage("assets/molen.png"),
-            fit: BoxFit.cover, // fill the screen while cropping
+            fit: BoxFit.cover,
           ),
         ),
         child: Center(
-          // 2) A scrollable center layout for smaller screens
           child: SingleChildScrollView(
-            // 3) A white “card” with padding
             child: Container(
-              width: 300, // you can adjust to your taste
+              width: 300,
               padding: const EdgeInsets.all(16.0),
               decoration: BoxDecoration(
                 color: Colors.white.withOpacity(0.9),
@@ -92,8 +100,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         style: const TextStyle(color: Colors.red),
                       ),
                     ),
-
-                  // 4) German labels, bold & black
                   TextField(
                     controller: _phoneController,
                     decoration: const InputDecoration(
@@ -105,7 +111,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-
                   if (!_otpRequested) ...[
                     ElevatedButton(
                       onPressed: _requestOtp,

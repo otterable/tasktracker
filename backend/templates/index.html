@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Demo Notifications & Heartbeat</title>
+  <title>Demo Notifications, Tasks & Heartbeat</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
-    h1 { color: #003056; }
+    h1, h2 { color: #003056; }
     form { margin-bottom: 30px; }
     label { display: block; margin-top: 10px; }
     input[type="text"], textarea, select { width: 300px; padding: 5px; }
@@ -16,7 +16,7 @@
   </style>
 </head>
 <body>
-  <h1>Demo Notifications & Heartbeat Status</h1>
+  <h1>Demo Notifications, Tasks & Heartbeat Status</h1>
 
   <h2>Server Heartbeat: <span style="color:green;">{{ heartbeat_status }}</span></h2>
 
@@ -30,7 +30,15 @@
 
     <div id="userInput" style="display:none;">
       <label for="username">Username (for selected user):</label>
+      {% if users %}
+      <select name="username" id="username">
+        {% for user in users %}
+          <option value="{{ user }}">{{ user }}</option>
+        {% endfor %}
+      </select>
+      {% else %}
       <input type="text" name="username" id="username" placeholder="Enter username">
+      {% endif %}
     </div>
 
     <label for="title">Notification Title:</label>
@@ -52,6 +60,7 @@
         <tr>
           <th>ID</th>
           <th>Title</th>
+          <th>Assigned To</th>
           <th>Creation Date</th>
           <th>Due Date</th>
         </tr>
@@ -61,6 +70,7 @@
           <tr>
             <td>{{ task['id'] }}</td>
             <td>{{ task['title'] }}</td>
+            <td>{{ task['assigned_to'] if task['assigned_to'] else 'Unassigned' }}</td>
             <td>{{ task['creation_date'] }}</td>
             <td>{{ task['due_date'] }}</td>
           </tr>
@@ -68,6 +78,35 @@
       </tbody>
     </table>
   {% endif %}
+
+  <h2>Create a New Task</h2>
+  <form method="POST" action="{{ url_for('create_task') }}">
+    <label for="task_title">Task Title:</label>
+    <input type="text" name="title" id="task_title" placeholder="Enter task title" required>
+
+    <label for="duration">Duration (hours):</label>
+    <select name="duration" id="duration">
+      <option value="12">12</option>
+      <option value="24">24</option>
+      <option value="48" selected>48</option>
+      <option value="72">72</option>
+    </select>
+
+    <label for="assigned_to">Assign To:</label>
+    {% if users %}
+    <select name="assigned_to" id="assigned_to">
+      <option value="">Unassigned</option>
+      {% for user in users %}
+        <option value="{{ user }}">{{ user }}</option>
+      {% endfor %}
+    </select>
+    {% else %}
+    <input type="text" name="assigned_to" id="assigned_to" placeholder="Enter username">
+    {% endif %}
+
+    <br>
+    <button type="submit">Create Task</button>
+  </form>
 
   <script>
     function toggleUserInput(value) {

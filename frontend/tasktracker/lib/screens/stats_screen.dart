@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_tasktracker/screens/dashboard_screen.dart';
 import 'package:flutter_tasktracker/screens/personal_stats_screen.dart';
+import 'package:flutter_tasktracker/widgets/custom_bottom_bar.dart';
 
 // Data classes for intermediate chart logic
 class CompletionCountChart {
@@ -46,7 +47,8 @@ class MultiLineActivity {
   MultiLineActivity(this.date, this.value);
 }
 
-// Updated StatsScreen now accepts currentUser and onLogout so it can pass them to the bottom bar.
+/// Updated StatsScreen with a modern, spacious, uncluttered design.
+/// Permanent value labels on bars and clear axis labels ensure the graphs are easy to read.
 class StatsScreen extends StatefulWidget {
   final String currentUser;
   final VoidCallback onLogout;
@@ -133,7 +135,9 @@ class _StatsScreenState extends State<StatsScreen> {
         taskCounts[title] = (taskCounts[title] ?? 0) + 1;
       }
     }
-    final tasksList = taskCounts.entries.map((e) => TaskTypeCountChart(e.key, e.value)).toList();
+    final tasksList = taskCounts.entries
+        .map((e) => TaskTypeCountChart(e.key, e.value))
+        .toList();
     tasksList.sort((a, b) => b.count.compareTo(a.count));
     final top5 = tasksList.take(5).toList();
     _mostCompletedBarGroups = _buildMostCompletedBarGroups(top5);
@@ -191,6 +195,7 @@ class _StatsScreenState extends State<StatsScreen> {
             fontWeight: FontWeight.bold,
             color: Colors.white,
           ),
+          titlePositionPercentageOffset: 0.55,
         ),
       );
     }
@@ -210,10 +215,11 @@ class _StatsScreenState extends State<StatsScreen> {
             BarChartRodData(
               toY: item.hours.toDouble(),
               color: _pickColor(i),
-              width: 20,
-              borderRadius: BorderRadius.zero,
+              width: 22,
+              borderRadius: BorderRadius.circular(4),
             ),
           ],
+          // Force the tooltip (showing the value) to be always visible.
           showingTooltipIndicators: [0],
         ),
       );
@@ -233,7 +239,31 @@ class _StatsScreenState extends State<StatsScreen> {
             BarChartRodData(
               toY: item.count.toDouble(),
               color: _pickColor(i),
-              width: 20,
+              width: 22,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ],
+          showingTooltipIndicators: [0],
+        ),
+      );
+    }
+    return groups;
+  }
+
+  // ---------- BUILD BAR DATA (Day of Week) ----------
+  List<BarChartGroupData> _buildDayOfWeekBarGroups(List<DayOfWeekCountChart> data) {
+    final groups = <BarChartGroupData>[];
+    for (int i = 0; i < data.length; i++) {
+      final item = data[i];
+      groups.add(
+        BarChartGroupData(
+          x: i,
+          barRods: [
+            BarChartRodData(
+              toY: item.count.toDouble(),
+              color: _pickColor(i),
+              width: 22,
+              borderRadius: BorderRadius.circular(4),
             ),
           ],
           showingTooltipIndicators: [0],
@@ -254,27 +284,6 @@ class _StatsScreenState extends State<StatsScreen> {
       spots.add(FlSpot(diff, e.count.toDouble()));
     }
     return spots;
-  }
-
-  // ---------- BUILD BAR DATA (Day of Week) ----------
-  List<BarChartGroupData> _buildDayOfWeekBarGroups(List<DayOfWeekCountChart> data) {
-    final groups = <BarChartGroupData>[];
-    for (int i = 0; i < data.length; i++) {
-      final item = data[i];
-      groups.add(
-        BarChartGroupData(
-          x: i,
-          barRods: [
-            BarChartRodData(
-              toY: item.count.toDouble(),
-              color: _pickColor(i),
-              width: 20,
-            ),
-          ],
-        ),
-      );
-    }
-    return groups;
   }
 
   // ---------- BUILD MULTI-LINE DATA (Wiesel vs Otter) ----------
@@ -303,136 +312,44 @@ class _StatsScreenState extends State<StatsScreen> {
       spots: wieselSpots,
       isCurved: true,
       color: Colors.blue,
-      barWidth: 2,
+      barWidth: 3,
+      dotData: FlDotData(show: true),
     );
 
     final otterLine = LineChartBarData(
       spots: otterSpots,
       isCurved: true,
       color: Colors.red,
-      barWidth: 2,
+      barWidth: 3,
+      dotData: FlDotData(show: true),
     );
 
     return [wieselLine, otterLine];
   }
 
-  // ---------- BOTTOM BAR ----------
-  Widget _buildBottomBar() {
-    return Container(
-      height: 60,
-      color: Colors.white,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _buildBottomBarItem(
-            index: 0,
-            icon: Icons.dashboard,
-            label: "Dashboard",
-            onTapOverride: () {
-              setState(() {
-                _selectedBottomIndex = 0;
-              });
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => DashboardScreen(
-                    currentUser: widget.currentUser,
-                    onLogout: widget.onLogout,
-                  ),
-                ),
-              );
-            },
-          ),
-          _buildBottomBarItem(
-            index: 1,
-            icon: Icons.bar_chart,
-            label: "Statistiken",
-            onTapOverride: () {
-              // Already on StatsScreen; do nothing.
-            },
-          ),
-          _buildBottomBarItem(
-            index: 2,
-            icon: Icons.person,
-            label: "Pers. Stats",
-            onTapOverride: () {
-              setState(() {
-                _selectedBottomIndex = 2;
-              });
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => PersonalStatsScreen(
-                    username: widget.currentUser,
-                    onLogout: widget.onLogout,
-                  ),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBottomBarItem({
-    required int index,
-    required IconData icon,
-    required String label,
-    required VoidCallback onTapOverride,
-  }) {
-    final bool isSelected = (_selectedBottomIndex == index);
-    return InkWell(
-      onTap: onTapOverride,
-      child: Container(
-        width: 80,
-        color: isSelected ? Colors.grey.shade300 : Colors.white,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 28, color: Colors.black87),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: isSelected ? FontWeight.w900 : FontWeight.w700,
-                color: const Color(0xFF111111),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ---------- NAVIGATION HELPER ----------
-  void _goToUserStats(String username) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PersonalStatsScreen(
-          username: username,
-          onLogout: widget.onLogout,
-        ),
-      ),
-    );
-  }
-
-  // ---------- BUILD (SINGLE BUILD METHOD) ----------
+  // ---------- MODERN & RESPONSIVE LAYOUT ----------
   @override
   Widget build(BuildContext context) {
+    // Show a loading spinner if needed.
     if (_loading) {
       return Scaffold(
         appBar: AppBar(title: const Text("Statistiken")),
-        bottomNavigationBar: _buildBottomBar(),
+        bottomNavigationBar: CustomBottomBar(
+          selectedIndex: _selectedBottomIndex,
+          currentUser: widget.currentUser,
+          onLogout: widget.onLogout,
+        ),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
     if (_stats == null) {
       return Scaffold(
         appBar: AppBar(title: const Text("Statistiken")),
-        bottomNavigationBar: _buildBottomBar(),
+        bottomNavigationBar: CustomBottomBar(
+          selectedIndex: _selectedBottomIndex,
+          currentUser: widget.currentUser,
+          onLogout: widget.onLogout,
+        ),
         body: const Center(child: Text("No stats loaded.")),
       );
     }
@@ -441,105 +358,170 @@ class _StatsScreenState extends State<StatsScreen> {
       appBar: AppBar(
         title: const Text("Statistiken (fl_chart)"),
       ),
-      bottomNavigationBar: _buildBottomBar(),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            // 1) Zeitraum section (old Dashboard style)
-            Card(
-              elevation: 4,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      bottomNavigationBar: CustomBottomBar(
+        selectedIndex: _selectedBottomIndex,
+        currentUser: widget.currentUser,
+        onLogout: widget.onLogout,
+      ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          // On narrow screens, cards will take full width;
+          // on wider screens, show two cards per row.
+          final double availableWidth = constraints.maxWidth;
+          final double cardWidth = availableWidth < 600 ? availableWidth : (availableWidth / 2) - 24;
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildTimePeriodCard(),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 16,
                   children: [
-                    const Text("Statistiken (Zeitraum)",
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        const Text("Zeitraum: "),
-                        const SizedBox(width: 8),
-                        DropdownButton<String>(
-                          value: _selectedStatRange,
-                          items: _statRanges.map((s) {
-                            return DropdownMenuItem<String>(
-                              value: s,
-                              child: Text(s),
-                            );
-                          }).toList(),
-                          onChanged: (val) {
-                            setState(() {
-                              _selectedStatRange = val ?? "Letzte 7 Tage";
-                            });
-                          },
-                        ),
-                      ],
+                    Container(width: cardWidth, child: _buildCompletionCountsCard()),
+                    Container(
+                      width: cardWidth,
+                      child: _buildBarChartCard(
+                        title: "Durchschnittliche Erledigungszeit (Stunden)",
+                        barGroups: _avgTimeBarGroups,
+                        labels: const ["Wiesel", "Otter"],
+                      ),
                     ),
-                    const SizedBox(height: 10),
-                    Text("Aufgaben zugewiesen ($_selectedStatRange):",
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    const Text("• Wiesel: 3"),
-                    const Text("• Otter: 4"),
-                    const SizedBox(height: 10),
-                    Text("Aufgaben erledigt ($_selectedStatRange):",
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    const Text("• Wiesel: 2"),
-                    const Text("• Otter: 5"),
-                    const SizedBox(height: 10),
-                    Text("Durchschnittliche Bearbeitungszeit ($_selectedStatRange):",
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    const Text("• Wiesel: 12h"),
-                    const Text("• Otter: 9h"),
+                    Container(
+                      width: cardWidth,
+                      child: _buildBarChartCard(
+                        title: "Meistabgeschlossene Aufgaben (Top 5)",
+                        barGroups: _mostCompletedBarGroups,
+                        labels: _mostCompletedBarGroups.map((_) => "").toList(),
+                      ),
+                    ),
+                    Container(
+                      width: cardWidth,
+                      child: _buildLineChartCard(
+                        title: "Abgeschlossene Aufgaben über Zeit",
+                        spots: _tasksOverTimeSpots,
+                      ),
+                    ),
+                    Container(
+                      width: cardWidth,
+                      child: _buildBarChartCard(
+                        title: "Aufgaben pro Wochentag",
+                        barGroups: _dayOfWeekBarGroups,
+                        labels: const ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
+                      ),
+                    ),
+                    Container(
+                      width: cardWidth,
+                      child: _buildMultiLineChartCard(
+                        title: "Mehrlinien-Vergleich (Wiesel vs Otter)",
+                        lines: _multiLineBarData,
+                      ),
+                    ),
                   ],
                 ),
-              ),
+                const SizedBox(height: 16),
+                Center(
+                  child: Wrap(
+                    spacing: 16,
+                    runSpacing: 16,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      ElevatedButton(
+                        onPressed: () => _launchUrl(ApiService.getCsvExportUrl()),
+                        child: const Text("Export as CSV"),
+                      ),
+                      ElevatedButton(
+                        onPressed: () => _launchUrl(ApiService.getXlsxExportUrl()),
+                        child: const Text("Export as XLSX"),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // ---------- Helper Widgets ----------
+
+  /// Card for selecting the statistics time period and displaying summary numbers.
+  Widget _buildTimePeriodCard() {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Statistiken (Zeitraum)",
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            // 2) Who completed how many
-            _buildCompletionCountsCard(),
-            const SizedBox(height: 16),
-            // 3) Bar chart for average time
-            _buildBarChartCard(
-              title: "Durchschnittliche Erledigungszeit (Stunden)",
-              barGroups: _avgTimeBarGroups,
-              labels: ["Wiesel", "Otter"],
+            Row(
+              children: [
+                const Text("Zeitraum: ", style: TextStyle(fontSize: 16)),
+                DropdownButton<String>(
+                  value: _selectedStatRange,
+                  items: _statRanges.map((s) {
+                    return DropdownMenuItem<String>(
+                      value: s,
+                      child: Text(s, style: const TextStyle(fontSize: 16)),
+                    );
+                  }).toList(),
+                  onChanged: (val) {
+                    setState(() {
+                      _selectedStatRange = val ?? "Letzte 7 Tage";
+                    });
+                  },
+                ),
+              ],
             ),
             const SizedBox(height: 16),
-            // 4) Bar chart for most completed tasks
-            _buildBarChartCard(
-              title: "Meistabgeschlossene Aufgaben (Top 5)",
-              barGroups: _mostCompletedBarGroups,
-              labels: _mostCompletedBarGroups.map((_) => "").toList(),
+            Text(
+              "Aufgaben zugewiesen ($_selectedStatRange):",
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
-            const SizedBox(height: 16),
-            // 5) Single line chart
-            _buildLineChartCard(
-              title: "Abgeschlossene Aufgaben über Zeit",
-              spots: _tasksOverTimeSpots,
+            const Padding(
+              padding: EdgeInsets.only(left: 8.0, top: 4),
+              child: Text("• Wiesel: 3", style: TextStyle(fontSize: 15)),
             ),
-            const SizedBox(height: 16),
-            // 6) Day-of-week bar chart
-            _buildBarChartCard(
-              title: "Aufgaben pro Wochentag",
-              barGroups: _dayOfWeekBarGroups,
-              labels: ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
+            const Padding(
+              padding: EdgeInsets.only(left: 8.0, top: 2),
+              child: Text("• Otter: 4", style: TextStyle(fontSize: 15)),
             ),
-            const SizedBox(height: 16),
-            // 7) Multi-line chart
-            _buildMultiLineChartCard(
-              title: "Mehrlinien-Vergleich (Wiesel vs Otter)",
-              lines: _multiLineBarData,
+            const SizedBox(height: 12),
+            Text(
+              "Aufgaben erledigt ($_selectedStatRange):",
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () => _launchUrl(ApiService.getCsvExportUrl()),
-              child: const Text("Export as CSV"),
+            const Padding(
+              padding: EdgeInsets.only(left: 8.0, top: 4),
+              child: Text("• Wiesel: 2", style: TextStyle(fontSize: 15)),
             ),
-            ElevatedButton(
-              onPressed: () => _launchUrl(ApiService.getXlsxExportUrl()),
-              child: const Text("Export as XLSX"),
+            const Padding(
+              padding: EdgeInsets.only(left: 8.0, top: 2),
+              child: Text("• Otter: 5", style: TextStyle(fontSize: 15)),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              "Durchschnittliche Bearbeitungszeit ($_selectedStatRange):",
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(left: 8.0, top: 4),
+              child: Text("• Wiesel: 12h", style: TextStyle(fontSize: 15)),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(left: 8.0, top: 2),
+              child: Text("• Otter: 9h", style: TextStyle(fontSize: 15)),
             ),
           ],
         ),
@@ -547,33 +529,35 @@ class _StatsScreenState extends State<StatsScreen> {
     );
   }
 
-  // ---------- Helper Widgets ----------
-
+  /// Card listing who has completed how many tasks.
   Widget _buildCompletionCountsCard() {
     if (_stats!.completions.isEmpty) {
       return Card(
         elevation: 3,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: const Padding(
-          padding: EdgeInsets.all(16),
+          padding: EdgeInsets.all(20),
           child: Text("No completions found"),
         ),
       );
     }
     return Card(
       elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         child: Column(
           children: [
             const Text(
               "Wer hat wie viele Aufgaben erledigt?",
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             ..._stats!.completions.map((c) {
               return ListTile(
-                title: Text(c.completedBy),
-                trailing: Text(c.totalCompleted.toString()),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 0),
+                title: Text(c.completedBy, style: const TextStyle(fontSize: 16)),
+                trailing: Text(c.totalCompleted.toString(), style: const TextStyle(fontSize: 16)),
               );
             }).toList(),
           ],
@@ -582,6 +566,7 @@ class _StatsScreenState extends State<StatsScreen> {
     );
   }
 
+  /// Bar chart card with permanent value labels and modern styling.
   Widget _buildBarChartCard({
     required String title,
     required List<BarChartGroupData> barGroups,
@@ -589,31 +574,52 @@ class _StatsScreenState extends State<StatsScreen> {
   }) {
     return Card(
       elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Container(
-        padding: const EdgeInsets.all(16),
-        height: 320,
+        padding: const EdgeInsets.all(20),
+        height: 340,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title,
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
             Expanded(
               child: BarChart(
                 BarChartData(
+                  barTouchData: BarTouchData(
+                    enabled: true,
+                    touchTooltipData: BarTouchTooltipData(
+                      tooltipPadding: const EdgeInsets.all(6),
+                      // Removed tooltipBackgroundColor parameter since it is not recognized.
+                      getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                        return BarTooltipItem(
+                          rod.toY.toInt().toString(),
+                          const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        );
+                      },
+                      fitInsideHorizontally: true,
+                      fitInsideVertically: true,
+                    ),
+                  ),
                   barGroups: barGroups,
                   titlesData: FlTitlesData(
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: labels != null && labels.isNotEmpty,
+                        reservedSize: 30,
+                        interval: 1,
                         getTitlesWidget: (value, meta) {
                           final idx = value.toInt();
                           if (idx < 0 || idx >= (labels?.length ?? 0)) {
-                            return Container();
+                            return const SizedBox.shrink();
                           }
                           return Padding(
-                            padding: const EdgeInsets.only(top: 8), // adds space below bars
+                            padding: const EdgeInsets.only(top: 6),
                             child: Text(
                               labels![idx],
                               style: const TextStyle(
@@ -626,13 +632,32 @@ class _StatsScreenState extends State<StatsScreen> {
                       ),
                     ),
                     leftTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: true),
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 32,
+                        interval: 1,
+                        getTitlesWidget: (value, meta) {
+                          return Text(
+                            value.toInt().toString(),
+                            style: const TextStyle(fontSize: 12),
+                          );
+                        },
+                      ),
                     ),
                     topTitles: AxisTitles(
                       sideTitles: SideTitles(showTitles: false),
                     ),
                     rightTitles: AxisTitles(
                       sideTitles: SideTitles(showTitles: false),
+                    ),
+                  ),
+                  borderData: FlBorderData(show: false),
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    getDrawingHorizontalLine: (value) => FlLine(
+                      color: Colors.grey.withOpacity(0.2),
+                      strokeWidth: 1,
                     ),
                   ),
                 ),
@@ -644,22 +669,23 @@ class _StatsScreenState extends State<StatsScreen> {
     );
   }
 
+  /// Line chart card with modern styling.
   Widget _buildLineChartCard({
     required String title,
     required List<FlSpot> spots,
   }) {
     return Card(
       elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Container(
-        padding: const EdgeInsets.all(16),
-        height: 320,
+        padding: const EdgeInsets.all(20),
+        height: 340,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title,
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
             Expanded(
               child: LineChart(
                 LineChartData(
@@ -669,34 +695,54 @@ class _StatsScreenState extends State<StatsScreen> {
                       isCurved: true,
                       color: Colors.blue,
                       barWidth: 3,
+                      dotData: FlDotData(show: true),
                     ),
                   ],
                   titlesData: FlTitlesData(
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
+                        reservedSize: 30,
+                        interval: 1,
                         getTitlesWidget: (value, meta) {
                           return Padding(
-                            padding: const EdgeInsets.only(top: 8),
+                            padding: const EdgeInsets.only(top: 6),
                             child: Text(
                               value.toInt().toString(),
                               style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                              ),
+                                  fontWeight: FontWeight.bold, fontSize: 12),
                             ),
                           );
                         },
                       ),
                     ),
                     leftTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: true),
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 32,
+                        interval: 1,
+                        getTitlesWidget: (value, meta) {
+                          return Text(
+                            value.toInt().toString(),
+                            style: const TextStyle(fontSize: 12),
+                          );
+                        },
+                      ),
                     ),
                     topTitles: AxisTitles(
                       sideTitles: SideTitles(showTitles: false),
                     ),
                     rightTitles: AxisTitles(
                       sideTitles: SideTitles(showTitles: false),
+                    ),
+                  ),
+                  borderData: FlBorderData(show: false),
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    getDrawingHorizontalLine: (value) => FlLine(
+                      color: Colors.grey.withOpacity(0.2),
+                      strokeWidth: 1,
                     ),
                   ),
                 ),
@@ -708,38 +754,62 @@ class _StatsScreenState extends State<StatsScreen> {
     );
   }
 
+  /// Multi-line chart card.
   Widget _buildMultiLineChartCard({
     required String title,
     required List<LineChartBarData> lines,
   }) {
     return Card(
       elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Container(
-        padding: const EdgeInsets.all(16),
-        height: 320,
+        padding: const EdgeInsets.all(20),
+        height: 340,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title,
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
             Expanded(
               child: LineChart(
                 LineChartData(
                   lineBarsData: lines,
                   titlesData: FlTitlesData(
                     bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: true),
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 30,
+                        interval: 1,
+                      ),
                     ),
                     leftTitles: AxisTitles(
-                      sideTitles: SideTitles(showTitles: true),
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 32,
+                        interval: 1,
+                        getTitlesWidget: (value, meta) {
+                          return Text(
+                            value.toInt().toString(),
+                            style: const TextStyle(fontSize: 12),
+                          );
+                        },
+                      ),
                     ),
                     topTitles: AxisTitles(
                       sideTitles: SideTitles(showTitles: false),
                     ),
                     rightTitles: AxisTitles(
                       sideTitles: SideTitles(showTitles: false),
+                    ),
+                  ),
+                  borderData: FlBorderData(show: false),
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    getDrawingHorizontalLine: (value) => FlLine(
+                      color: Colors.grey.withOpacity(0.2),
+                      strokeWidth: 1,
                     ),
                   ),
                 ),
@@ -751,6 +821,7 @@ class _StatsScreenState extends State<StatsScreen> {
     );
   }
 
+  // ---------- Helper: Pick a color from a preset list ----------
   Color _pickColor(int index) {
     const colors = [
       Colors.blue,

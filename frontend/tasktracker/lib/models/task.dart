@@ -9,6 +9,9 @@ class Task {
   final int completed; // 0 or 1
   final String? completedBy;
   final String? completedOn;
+  final bool recurring;
+  final int? frequencyHours;
+  final bool alwaysAssigned;
 
   Task({
     required this.id,
@@ -19,6 +22,9 @@ class Task {
     required this.completed,
     this.completedBy,
     this.completedOn,
+    required this.recurring,
+    this.frequencyHours,
+    required this.alwaysAssigned,
   });
 
   factory Task.fromJson(Map<String, dynamic> json) {
@@ -31,6 +37,9 @@ class Task {
       completed: json["completed"],
       completedBy: json["completed_by"],
       completedOn: json["completed_on"],
+      recurring: json["recurring"] == 1 || json["recurring"] == true,
+      frequencyHours: json["frequency_hours"],
+      alwaysAssigned: json["always_assigned"] == 1 || json["always_assigned"] == true,
     );
   }
 }

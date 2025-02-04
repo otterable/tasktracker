@@ -1,4 +1,4 @@
-package com.example.tasktracker
+package com.molentracker
 
 import io.flutter.embedding.android.FlutterActivity
 

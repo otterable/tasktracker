@@ -1,16 +1,17 @@
-// lib/notification_service.dart
-
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Needed to load assets.
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
 
   static Future<void> init() async {
-    // Initialize plugin for Android, iOS, etc.
+    // For the small icon, we must use a drawable resource.
+    // We continue using 'ic_launcher' (as defined in your Android manifest and resources).
     const AndroidInitializationSettings androidInitSettings =
-        AndroidInitializationSettings('app_icon'); // put your icon in drawable
+        AndroidInitializationSettings('ic_launcher');
     const DarwinInitializationSettings iosInitSettings = DarwinInitializationSettings();
 
     const InitializationSettings initSettings = InitializationSettings(
@@ -25,19 +26,26 @@ class NotificationService {
     required String title,
     required String body,
   }) async {
-    const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'task_notifications', // channel ID
-      'Tasks Channel',      // channel name
-      channelDescription: 'Notifications for tasks updates',
+    // Load the logo asset from assets/logo.png as ByteData.
+    final ByteData bytes = await rootBundle.load('assets/logo.png');
+    final Uint8List largeIcon = bytes.buffer.asUint8List();
+
+    // Build Android notification details with the logo as the large icon.
+    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      'task_notifications', // Channel ID
+      'Tasks Channel',      // Channel name
+      channelDescription: 'Notifications for task updates',
       importance: Importance.max,
       priority: Priority.high,
       playSound: true,
+      largeIcon: ByteArrayAndroidBitmap(largeIcon),
     );
 
-    const NotificationDetails platformDetails = NotificationDetails(android: androidDetails);
+    final NotificationDetails platformDetails =
+        NotificationDetails(android: androidDetails);
 
     await _flutterLocalNotificationsPlugin.show(
-      0, // notification ID
+      0, // Notification ID
       title,
       body,
       platformDetails,

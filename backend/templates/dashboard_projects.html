@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Manage Projects</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    header { background-color: #003056; color: white; padding: 10px; }
+    nav a { margin-right: 15px; text-decoration: none; color: #FFD700; font-weight: bold; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { padding: 10px; border: 1px solid #ccc; text-align: left; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Manage Projects</h1>
+    <p>Welcome, {{ session['username'] }} | <a href="{{ url_for('logout') }}">Logout</a></p>
+  </header>
+  <nav>
+    <a href="{{ url_for('dashboard') }}">Overview</a>
+    <a href="{{ url_for('dashboard_tasks') }}">Tasks</a>
+    <a href="{{ url_for('dashboard_projects') }}">Projects</a>
+    <a href="{{ url_for('dashboard_users') }}">Users</a>
+    <a href="{{ url_for('dashboard_notifications') }}">Notifications</a>
+    <a href="{{ url_for('dashboard_export') }}">Exports</a>
+  </nav>
+  <section>
+    <h2>All Projects</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Description</th>
+          <th>Created By</th>
+          <th>Creation Date</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for project in projects %}
+        <tr>
+          <td>{{ project["id"] }}</td>
+          <td>{{ project["name"] }}</td>
+          <td>{{ project["description"] }}</td>
+          <td>{{ project["created_by"] }}</td>
+          <td>{{ project["creation_date"]|human_date }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</body>
+</html>

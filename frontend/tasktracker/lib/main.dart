@@ -1,11 +1,14 @@
 // lib/main.dart, do not remove this line!
 
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // for SystemChrome if needed
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 
 import 'package:flutter_tasktracker/screens/login_screen.dart';
 import 'package:flutter_tasktracker/screens/dashboard_screen.dart';
@@ -39,20 +42,48 @@ Future<void> _initNotifications() async {
   );
 }
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+Future<void> main() async {
+  // Wrap the entire app initialization in runZonedGuarded.
+  runZonedGuarded(() async {
+    // Initialize Flutter bindings inside the zone.
+    WidgetsFlutterBinding.ensureInitialized();
 
-  // 1) Initialize date formatting for the German locale
-  await initializeDateFormatting('de_DE', null);
+    // Initialize Firebase with appropriate options for web.
+    await Firebase.initializeApp(
+      options: kIsWeb
+          ? FirebaseOptions(
+              apiKey: "AIzaSyAe0PuVKr7__L7UJWuozoatgsGgIxKDWbQ",
+              authDomain: "molentracker.firebaseapp.com",
+              projectId: "molentracker",
+              storageBucket: "molentracker.firebasestorage.app",
+              messagingSenderId: "226742919528",
+              appId: "1:226742919528:web:c57a16d17073ae923276dd",
+              measurementId: "G-B8XD6ZKGCJ",
+            )
+          : null,
+    );
 
-  // 2) Initialize local notifications
-  await _initNotifications();
+    // Initialize Crashlytics only on mobile platforms.
+    if (!kIsWeb) {
+      FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterError;
+    }
 
-  // 3) Load persistent login state before running the app
-  final prefs = await SharedPreferences.getInstance();
-  final storedUser = prefs.getString('currentUser') ?? "";
+    // Initialize date formatting for the German locale.
+    await initializeDateFormatting('de_DE', null);
 
-  runApp(MyTaskTrackerApp(initialUser: storedUser));
+    // Initialize local notifications.
+    await _initNotifications();
+
+    // Load persistent login state before running the app.
+    final prefs = await SharedPreferences.getInstance();
+    final storedUser = prefs.getString('currentUser') ?? "";
+
+    runApp(MyTaskTrackerApp(initialUser: storedUser));
+  }, (error, stack) {
+    if (!kIsWeb) {
+      FirebaseCrashlytics.instance.recordError(error, stack);
+    }
+  });
 }
 
 class MyTaskTrackerApp extends StatefulWidget {
@@ -66,18 +97,18 @@ class MyTaskTrackerApp extends StatefulWidget {
 
 class _MyTaskTrackerAppState extends State<MyTaskTrackerApp> {
   bool _isLoggedIn = false;
-  String _currentUser = ""; // e.g., "weasel" or "Otter"
+  String _currentUser = ""; // e.g., "Wiesel" or "Otter"
   Timer? _heartbeatTimer;
 
   @override
   void initState() {
     super.initState();
-    // Set login state based on the persistent storage
+    // Set login state based on persistent storage.
     if (widget.initialUser.isNotEmpty) {
       _isLoggedIn = true;
       _currentUser = widget.initialUser;
     }
-    // Start heartbeat checks every 5 seconds
+    // Start heartbeat checks every 5 seconds.
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
       final ok = await ApiService.getHeartbeat();
       if (!ok) {
@@ -94,7 +125,7 @@ class _MyTaskTrackerAppState extends State<MyTaskTrackerApp> {
     super.dispose();
   }
 
-  // When login is successful, persist the username
+  // When login is successful, persist the username.
   Future<void> _login(String username) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('currentUser', username);
@@ -104,7 +135,7 @@ class _MyTaskTrackerAppState extends State<MyTaskTrackerApp> {
     });
   }
 
-  // On logout, remove the stored username
+  // On logout, remove the stored username.
   Future<void> _logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('currentUser');
@@ -116,7 +147,7 @@ class _MyTaskTrackerAppState extends State<MyTaskTrackerApp> {
 
   @override
   Widget build(BuildContext context) {
-    // Build theme using your custom colors
+    // Build theme using your custom colors.
     final theme = ThemeData(
       fontFamily: 'Roboto',
       primaryColor: const Color(0xFF003056),

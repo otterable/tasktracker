@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Send Notifications</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    header { background-color: #003056; color: white; padding: 10px; }
+    nav a { margin-right: 15px; text-decoration: none; color: #FFD700; font-weight: bold; }
+    form { margin-top: 20px; }
+    label { display: block; margin-top: 10px; }
+    input, select, textarea { width: 300px; padding: 5px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Send Notifications</h1>
+    <p>Welcome, {{ session['username'] }} | <a href="{{ url_for('logout') }}">Logout</a></p>
+  </header>
+  <nav>
+    <a href="{{ url_for('dashboard') }}">Overview</a>
+    <a href="{{ url_for('dashboard_tasks') }}">Tasks</a>
+    <a href="{{ url_for('dashboard_projects') }}">Projects</a>
+    <a href="{{ url_for('dashboard_users') }}">Users</a>
+    <a href="{{ url_for('dashboard_notifications') }}">Notifications</a>
+    <a href="{{ url_for('dashboard_export') }}">Exports</a>
+  </nav>
+  <section>
+    <h2>Compose Notification</h2>
+    <form method="POST" action="{{ url_for('dashboard_notifications') }}">
+      <label for="title">Title:</label>
+      <input type="text" id="title" name="title" placeholder="Notification title" required>
+      
+      <label for="body">Message:</label>
+      <textarea id="body" name="body" placeholder="Notification message" required></textarea>
+      
+      <label for="target">Target:</label>
+      <select id="target" name="target" onchange="toggleUserSelection(this.value)">
+        <option value="all">All Users</option>
+        <option value="selected">Selected User</option>
+      </select>
+      
+      <div id="userSelect" style="display: none;">
+        <label for="username">Select User:</label>
+        <select id="username" name="username">
+          {% for user in users %}
+          <option value="{{ user }}">{{ user }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      
+      <br>
+      <button type="submit">Send Notification</button>
+    </form>
+  </section>
+  <script>
+    function toggleUserSelection(value) {
+      document.getElementById('userSelect').style.display = (value === 'selected') ? 'block' : 'none';
+    }
+  </script>
+</body>
+</html>
