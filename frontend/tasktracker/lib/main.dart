@@ -1,5 +1,3 @@
-// lib/main.dart, do not remove this line!
-
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';

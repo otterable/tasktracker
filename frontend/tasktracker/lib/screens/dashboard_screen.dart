@@ -8,6 +8,7 @@ import 'package:flutter_tasktracker/models/task.dart';
 import 'package:flutter_tasktracker/screens/personal_stats_screen.dart';
 import 'package:flutter_tasktracker/screens/stats_screen.dart';
 import 'package:flutter_tasktracker/screens/group_management_screen.dart'; // NEW: Import GroupManagementScreen
+import 'package:flutter_tasktracker/screens/history_screen.dart'; // NEW: Import HistoryScreen
 import 'package:flutter_tasktracker/utils.dart';
 import 'package:flutter_tasktracker/notification_service.dart'; // Must be implemented separately
 import 'package:flutter_tasktracker/widgets/custom_bottom_bar.dart'; // Using your custom bottom bar
@@ -856,14 +857,24 @@ class _DashboardScreenState extends State<DashboardScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Title row with close button.
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(
-                        child: Text(
-                          task.title,
-                          style: const TextStyle(
-                              fontSize: 20, fontWeight: FontWeight.bold),
+                        child: Row(
+                          children: [
+                            Text(
+                              task.title,
+                              style: const TextStyle(
+                                  fontSize: 20, fontWeight: FontWeight.bold),
+                            ),
+                            if (task.recurring == true)
+                              const Padding(
+                                padding: EdgeInsets.only(left: 4),
+                                child: Icon(Icons.repeat, size: 20, color: Colors.blue),
+                              ),
+                          ],
                         ),
                       ),
                       IconButton(
@@ -928,6 +939,18 @@ class _DashboardScreenState extends State<DashboardScreen>
                         ),
                       ),
                     ],
+                  // NEW: If the task is recurring, show an indicator.
+                  if (task.recurring == true) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(Icons.repeat, color: Colors.blue),
+                        const SizedBox(width: 4),
+                        // Updated here: use task.frequencyHours instead of task.frequency_hours
+                        Text("Repeats every ${task.frequencyHours} h", style: const TextStyle(fontStyle: FontStyle.italic)),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Row(
                     children: [
@@ -1369,9 +1392,18 @@ class _DashboardScreenState extends State<DashboardScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(task.title,
-              style: const TextStyle(
-                  fontWeight: FontWeight.bold, color: Colors.black)),
+          Row(
+            children: [
+              Text(task.title,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.black)),
+              if (task.recurring == true)
+                const Padding(
+                  padding: EdgeInsets.only(left: 4),
+                  child: Icon(Icons.repeat, size: 16, color: Colors.blue),
+                ),
+            ],
+          ),
           if (subtitleWidgets.isNotEmpty) ...[
             const SizedBox(height: 8),
             ...subtitleWidgets,
@@ -1873,7 +1905,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             child: const Text("Abbrechen"),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.of(ctx).pop();
               _finishTask(task);
             },
@@ -1888,9 +1920,10 @@ class _DashboardScreenState extends State<DashboardScreen>
     try {
       debugPrint("[Dashboard] Finishing task id=${task.id} by user ${widget.currentUser}");
       final updatedTask = await ApiService.finishTask(task.id, widget.currentUser);
+      debugPrint("[Dashboard] Task finished and archived: ${updatedTask.toJson()}");
       await _fetchAllTasks();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Aufgabe '${task.title}' als erledigt markiert.")),
+        SnackBar(content: Text("Aufgabe '${task.title}' wurde als erledigt markiert und archiviert.")),
       );
       _scheduleNotifications(updatedTask, "completed");
     } catch (e) {
@@ -1970,9 +2003,10 @@ class _DashboardScreenState extends State<DashboardScreen>
     try {
       debugPrint("[Dashboard] Deleting task id=${task.id}");
       await ApiService.deleteTask(task.id);
+      debugPrint("[Dashboard] Task deleted and archived: ${task.id}");
       await _fetchAllTasks();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Aufgabe '${task.title}' wurde gelöscht.")),
+        SnackBar(content: Text("Aufgabe '${task.title}' wurde gelöscht und archiviert.")),
       );
     } catch (e) {
       debugPrint("[Dashboard] Fehler beim Löschen der Aufgabe: $e");
@@ -2028,6 +2062,20 @@ class _DashboardScreenState extends State<DashboardScreen>
               });
             },
           ),
+          // NEW: History icon – navigates to the new HistoryScreen.
+          IconButton(
+            icon: const Icon(Icons.history),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => HistoryScreen(
+                      currentUser: widget.currentUser,
+                      selectedGroupId: _selectedGroupId),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: _openNewTaskPanel,
@@ -2078,6 +2126,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       bottomNavigationBar: CustomBottomBar(
         selectedIndex: 0,
         currentUser: widget.currentUser,
+        currentGroupId: _selectedGroupId, // NEW: Pass the group id
         onLogout: widget.onLogout,
       ),
       body: Stack(

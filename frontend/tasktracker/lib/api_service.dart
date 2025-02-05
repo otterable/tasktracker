@@ -44,7 +44,7 @@ class ApiService {
     }
   }
 
-  // Register a new user
+  /// Register a new user
   static Future<Map<String, dynamic>?> registerUser(String phone, String username) async {
     debugPrint("[ApiService] POST /api/register => phone=$phone, username=$username");
     final response = await http.post(
@@ -79,9 +79,13 @@ class ApiService {
     }
   }
 
+  /// When creating a task, you may optionally specify a projectId.
   static Future<Task> createTask(String title, int durationHours, String? assignedTo, String groupId,
-      {bool recurring = false, int frequencyHours = 24, bool alwaysAssigned = true}) async {
-    debugPrint("[ApiService] POST /api/tasks => title=$title, group_id=$groupId, durationHours=$durationHours, assignedTo=$assignedTo, recurring=$recurring");
+      {bool recurring = false,
+      int frequencyHours = 24,
+      bool alwaysAssigned = true,
+      int? projectId}) async {
+    debugPrint("[ApiService] POST /api/tasks => title=$title, group_id=$groupId, durationHours=$durationHours, assignedTo=$assignedTo, recurring=$recurring, projectId=$projectId");
     final bodyData = {
       "title": title,
       "duration_hours": durationHours,
@@ -90,6 +94,7 @@ class ApiService {
       "recurring": recurring,
       "frequency_hours": recurring ? frequencyHours : null,
       "always_assigned": recurring ? alwaysAssigned : null,
+      "project_id": projectId
     };
     final response = await http.post(
       Uri.parse("$baseUrl/api/tasks"),
@@ -105,9 +110,11 @@ class ApiService {
     }
   }
 
+  /// Create a recurring task. (Optionally, you could extend this to pass along projectId as well.)
   static Future<Task> createRecurringTask(String title, int durationHours, String? assignedTo, String groupId,
-      int frequencyHours, bool alwaysAssigned) async {
-    debugPrint("[ApiService] POST /api/tasks/recurring => title=$title, group_id=$groupId, durationHours=$durationHours, assignedTo=$assignedTo, frequencyHours=$frequencyHours, alwaysAssigned=$alwaysAssigned");
+      int frequencyHours, bool alwaysAssigned,
+      {int? projectId}) async {
+    debugPrint("[ApiService] POST /api/tasks/recurring => title=$title, group_id=$groupId, durationHours=$durationHours, assignedTo=$assignedTo, frequencyHours=$frequencyHours, alwaysAssigned=$alwaysAssigned, projectId=$projectId");
     final bodyData = {
       "title": title,
       "duration_hours": durationHours,
@@ -115,6 +122,7 @@ class ApiService {
       "group_id": groupId,
       "frequency_hours": frequencyHours,
       "always_assigned": alwaysAssigned,
+      "project_id": projectId
     };
     final response = await http.post(
       Uri.parse("$baseUrl/api/tasks/recurring"),
@@ -300,6 +308,45 @@ class ApiService {
   static String getProjectsXlsxExportUrl() => "$baseUrl/api/projects/export_xlsx";
 
   /// -----------------------
+  ///  Project Assignments Endpoints
+  /// -----------------------
+  static Future<List<String>> getProjectAssignments(int projectId) async {
+    debugPrint("[ApiService] GET /api/projects/$projectId/assignments");
+    final response = await http.get(Uri.parse("$baseUrl/api/projects/$projectId/assignments"));
+    if (response.statusCode == 200) {
+      List list = json.decode(response.body);
+      return list.map((e) => e.toString()).toList();
+    } else {
+      debugPrint("[ApiService] getProjectAssignments failed => ${response.body}");
+      throw Exception("Failed to load project assignments");
+    }
+  }
+
+  static Future<Map<String, dynamic>> addProjectAssignment(int projectId, String username) async {
+    debugPrint("[ApiService] POST /api/projects/$projectId/assignments => username=$username");
+    final response = await http.post(
+      Uri.parse("$baseUrl/api/projects/$projectId/assignments"),
+      headers: {"Content-Type": "application/json"},
+      body: json.encode({"username": username}),
+    );
+    if (response.statusCode == 201) {
+      return json.decode(response.body);
+    } else {
+      debugPrint("[ApiService] addProjectAssignment failed => ${response.body}");
+      throw Exception("Failed to add project assignment");
+    }
+  }
+
+  static Future<void> removeProjectAssignment(int projectId, String username) async {
+    debugPrint("[ApiService] DELETE /api/projects/$projectId/assignments/$username");
+    final response = await http.delete(Uri.parse("$baseUrl/api/projects/$projectId/assignments/$username"));
+    if (response.statusCode != 200) {
+      debugPrint("[ApiService] removeProjectAssignment failed => ${response.body}");
+      throw Exception("Failed to remove project assignment");
+    }
+  }
+
+  /// -----------------------
   ///  Group & Permission Endpoints
   /// -----------------------
   static Future<List<dynamic>> getUserGroups(String username) async {
@@ -462,4 +509,25 @@ class ApiService {
       throw Exception("Failed to load group members");
     }
   }
+
+  // --- New Methods for History / Archiving ---
+
+  /// Fetch archived tasks (history) for a given group.
+  static Future<List<Task>> getTaskHistory(String groupId) async {
+    debugPrint("[ApiService] GET /api/history?group_id=$groupId ...");
+    final response = await http.get(Uri.parse("$baseUrl/api/history?group_id=$groupId"));
+    if (response.statusCode == 200) {
+      final list = json.decode(response.body) as List;
+      return list.map((jsonItem) => Task.fromJson(jsonItem)).toList();
+    } else {
+      debugPrint("[ApiService] getTaskHistory failed => ${response.body}");
+      throw Exception("Failed to load history tasks");
+    }
+  }
+
+  /// URL to export archived tasks as CSV.
+  static String getHistoryCsvExportUrl() => "$baseUrl/export_history_csv";
+
+  /// URL to export archived tasks as XLSX.
+  static String getHistoryXlsxExportUrl() => "$baseUrl/export_history_xlsx";
 }

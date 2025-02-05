@@ -24,11 +24,13 @@ class DailyUserPerformance {
 /// and then filters for the current user.
 class PersonalStatsScreen extends StatefulWidget {
   final String username;
+  final String currentGroupId; // NEW: Add currentGroupId here
   final VoidCallback onLogout;
 
   const PersonalStatsScreen({
     Key? key,
     required this.username,
+    required this.currentGroupId,
     required this.onLogout,
   }) : super(key: key);
 
@@ -52,9 +54,6 @@ class _PersonalStatsScreenState extends State<PersonalStatsScreen> {
   List<BarChartGroupData> _dailyPerformanceBarGroups = [];
   List<FlSpot> _tasksOverTimeSpots = [];
 
-  // Group id for stats; update this as needed.
-  final String _groupId = "default_group";
-
   @override
   void initState() {
     super.initState();
@@ -67,7 +66,7 @@ class _PersonalStatsScreenState extends State<PersonalStatsScreen> {
     setState(() => _loading = true);
     try {
       // Get overall stats from the API. Pass the group id.
-      final statsResponse = await ApiService.getStats(_groupId);
+      final statsResponse = await ApiService.getStats(widget.currentGroupId);
 
       // Filter the "all_tasks" list to those completed by the current user.
       final List<dynamic> allTasks = statsResponse.allTasksRaw;
@@ -125,7 +124,6 @@ class _PersonalStatsScreenState extends State<PersonalStatsScreen> {
 
   void _buildCharts(List<dynamic> userTasks) {
     // Build Pie Chart Data: Distribution by Category.
-    // Categories are defined based on keywords in the title.
     Map<String, int> categoryCounts = {
       "Wäsche": 0,
       "Küche": 0,
@@ -519,6 +517,7 @@ class _PersonalStatsScreenState extends State<PersonalStatsScreen> {
         bottomNavigationBar: CustomBottomBar(
           selectedIndex: 2,
           currentUser: widget.username,
+          currentGroupId: widget.currentGroupId,
           onLogout: widget.onLogout,
         ),
         body: const Center(child: CircularProgressIndicator()),
@@ -531,6 +530,7 @@ class _PersonalStatsScreenState extends State<PersonalStatsScreen> {
       bottomNavigationBar: CustomBottomBar(
         selectedIndex: 2,
         currentUser: widget.username,
+        currentGroupId: widget.currentGroupId,
         onLogout: widget.onLogout,
       ),
       body: LayoutBuilder(

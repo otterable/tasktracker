@@ -1,20 +1,21 @@
-// lib/widgets/custom_bottom_bar.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter_tasktracker/screens/dashboard_screen.dart';
 import 'package:flutter_tasktracker/screens/stats_screen.dart';
 import 'package:flutter_tasktracker/screens/personal_stats_screen.dart';
 import 'package:flutter_tasktracker/screens/my_account_screen.dart';
+import 'package:flutter_tasktracker/screens/projects_screen.dart'; // Import the projects screen
 
 class CustomBottomBar extends StatelessWidget {
   final int selectedIndex; // currently unused; you may remove if not needed
   final String currentUser;
+  final String currentGroupId; // NEW: Pass the currently selected group ID
   final VoidCallback onLogout;
 
   const CustomBottomBar({
     Key? key,
     required this.selectedIndex,
     required this.currentUser,
+    required this.currentGroupId,
     required this.onLogout,
   }) : super(key: key);
 
@@ -56,6 +57,7 @@ class CustomBottomBar extends StatelessWidget {
             MaterialPageRoute(
               builder: (_) => StatsScreen(
                 currentUser: currentUser,
+                currentGroupId: currentGroupId, // NEW
                 onLogout: onLogout,
               ),
             ),
@@ -66,6 +68,7 @@ class CustomBottomBar extends StatelessWidget {
             MaterialPageRoute(
               builder: (_) => PersonalStatsScreen(
                 username: currentUser,
+                currentGroupId: currentGroupId, // NEW
                 onLogout: onLogout,
               ),
             ),
@@ -148,8 +151,15 @@ class CustomBottomBar extends StatelessWidget {
               icon: Icons.work,
               label: "Projects",
               onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Projects – Coming soon")),
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ProjectsScreen(
+                      currentUser: currentUser,
+                      groupId: currentGroupId,
+                      onLogout: onLogout,
+                    ),
+                  ),
                 );
               },
             ),

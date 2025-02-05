@@ -15,41 +15,31 @@ import io
 import re
 import random
 from datetime import datetime, timedelta
-import requests  # Only used for non-FCM calls if needed
+import requests
 
-# 1) Import and enable CORS
 from flask_cors import CORS
-
-# 2) Import Twilio client
 from twilio.rest import Client
-
-# 3) Import Firebase Admin SDK modules
 import firebase_admin
 from firebase_admin import credentials, messaging
 
 app = Flask(__name__)
 app.secret_key = "my-very-strong-secret-key"  # Change this to something secure
-
-# Enable CORS for all routes
 CORS(app)
 
-# Use an absolute path for the database file so that every connection is to the same file.
 DATABASE = os.path.join(app.root_path, 'database.db')
 LIVE_BASE_URL = "https://molentracker.ermine.at"
 
 ######################### TWILIO CONFIGURATION #########################
 TWILIO_ACCOUNT_SID = "ACc21e0ab649ebe0280c1cab26ebdb92be"
 TWILIO_AUTH_TOKEN = "4799cd1a4a179d21f1fc1083aab66736"
-TWILIO_FROM_NUMBER = "+14243294447"  # Your Twilio phone number
+TWILIO_FROM_NUMBER = "+14243294447"
 #########################################################################
 
-# Legacy phone->username mapping (no longer used for OTP registration)
 PHONE_TO_USERNAME = {
     "+436703596614": "otter",
     "+4369910503659": "weasel"
 }
 
-# Dictionary to store OTP requests (transient)
 pending_otps = {}
 
 # ----- Firebase Admin Initialization -----
@@ -60,8 +50,6 @@ try:
 except Exception as e:
     log_msg = f"Error initializing Firebase Admin: {e}"
 print(f"[DEBUG] {log_msg}")
-
-# ---------------- Helper Functions ----------------
 
 def normalize_phone(phone: str) -> str:
     p = re.sub(r"[^0-9+]", "", phone)
@@ -126,14 +114,7 @@ def to_datetime_filter(value):
         return None
     return datetime.fromisoformat(value)
 
-# ---------------- Updated requires_permission Decorator ----------------
 def requires_permission(permission_name):
-    """
-    Decorator to require a given permission.
-    For mobile API calls that don't carry a session cookie,
-    this decorator checks for a "creator" field in the JSON payload
-    and sets session['username'] accordingly.
-    """
     def decorator(f):
         def wrapper(*args, **kwargs):
             data = request.get_json(silent=True) or {}
@@ -179,7 +160,6 @@ def get_user_permissions(username: str) -> set:
     log(f"[get_user_permissions] User '{username}' has permissions: {permissions}")
     return permissions
 
-# ---------------- Helper: Create Table If Not Exists ----------------
 def create_table_if_not_exists(cursor, table_name, create_sql):
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
     result = cursor.fetchone()
@@ -190,7 +170,6 @@ def create_table_if_not_exists(cursor, table_name, create_sql):
     else:
         log(f"Table '{table_name}' already exists.")
 
-# ---------------- Database Initialization ----------------
 def init_db():
     log("Initializing database...")
     new_db = not os.path.exists(DATABASE)
@@ -202,7 +181,7 @@ def init_db():
     else:
         log("Database file exists. Running CREATE TABLE IF NOT EXISTS for all tables.")
 
-    # Create tasks table
+    # Create tasks table (now with project_id)
     create_table_if_not_exists(cursor, "tasks", '''
         CREATE TABLE tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -216,7 +195,8 @@ def init_db():
             recurring BOOLEAN DEFAULT 0,
             frequency_hours INTEGER,
             always_assigned BOOLEAN DEFAULT 1,
-            group_id TEXT
+            group_id TEXT,
+            project_id INTEGER
         )
     ''')
     # Create device_tokens table
@@ -253,6 +233,15 @@ def init_db():
             completed BOOLEAN DEFAULT 0,
             completed_by TEXT,
             completed_on TEXT,
+            FOREIGN KEY(project_id) REFERENCES projects(id)
+        )
+    ''')
+    # Create project_assignments table (new)
+    create_table_if_not_exists(cursor, "project_assignments", '''
+        CREATE TABLE project_assignments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            username TEXT NOT NULL,
             FOREIGN KEY(project_id) REFERENCES projects(id)
         )
     ''')
@@ -324,7 +313,6 @@ def init_db():
             FOREIGN KEY(sop_id) REFERENCES sops(id)
         )
     ''')
-    # Insert default tasks if none exist
     cursor.execute('SELECT COUNT(*) as count FROM tasks')
     count_tasks = cursor.fetchone()['count']
     if count_tasks == 0:
@@ -347,7 +335,6 @@ def get_registered_users():
     log(f"[get_registered_users] Found {len(users)} registered user(s).")
     return users
 
-# ---------------- After Request: Disable Caching ----------------
 @app.after_request
 def add_header(response):
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -649,7 +636,6 @@ def api_get_group_members(group_id):
 
 # --- Tasks Endpoints ---
 
-# First, define the recurring task endpoint
 @app.route('/api/tasks/recurring', methods=['POST'])
 def api_create_recurring_task():
     try:
@@ -661,6 +647,7 @@ def api_create_recurring_task():
         assigned_to = data.get("assigned_to")
         frequency_hours = data.get("frequency_hours")
         always_assigned = data.get("always_assigned", True)
+        project_id = data.get("project_id")  # optional
 
         if not title or not group_id or duration_hours is None or frequency_hours is None:
             log("[api_create_recurring_task] Missing required parameters")
@@ -682,9 +669,9 @@ def api_create_recurring_task():
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO tasks 
-            (title, assigned_to, creation_date, due_date, completed, recurring, group_id, frequency_hours, always_assigned)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (title, assigned_to, creation_date, due_date, completed, 1, group_id, frequency_hours, int(always_assigned)))
+            (title, assigned_to, creation_date, due_date, completed, recurring, group_id, frequency_hours, always_assigned, project_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (title, assigned_to, creation_date, due_date, completed, 1, group_id, frequency_hours, int(always_assigned), project_id))
         conn.commit()
         new_id = cursor.lastrowid
         log(f"[api_create_recurring_task] Recurring task inserted with id={new_id}")
@@ -709,7 +696,8 @@ def api_create_recurring_task():
             "recurring": bool(row["recurring"]),
             "frequency_hours": row["frequency_hours"],
             "always_assigned": bool(row["always_assigned"]),
-            "group_id": row["group_id"]
+            "group_id": row["group_id"],
+            "project_id": row["project_id"]
         }
         log(f"[api_create_recurring_task] Successfully created recurring task: {task}")
         return jsonify(task), 201
@@ -718,8 +706,6 @@ def api_create_recurring_task():
         log(f"[api_create_recurring_task] Exception occurred: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
-# Next, define the GET and POST endpoints for normal tasks.
-# IMPORTANT: We add unique endpoints so they do not override each other.
 @app.route('/api/tasks', methods=['GET'], endpoint='api_get_tasks')
 def api_get_tasks():
     group_id = request.args.get("group_id")
@@ -750,6 +736,7 @@ def api_create_task():
         duration_hours = data.get("duration_hours")
         assigned_to = data.get("assigned_to")
         recurring = data.get("recurring", False)
+        project_id = data.get("project_id")  # optional
 
         if not title or not group_id or duration_hours is None:
             log("[api_create_task] Missing required parameters: title, group_id, or duration_hours")
@@ -773,9 +760,9 @@ def api_create_task():
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO tasks 
-            (title, assigned_to, creation_date, due_date, completed, recurring, group_id, frequency_hours, always_assigned)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (title, assigned_to, creation_date, due_date, completed, int(recurring), group_id, frequency_hours, always_assigned))
+            (title, assigned_to, creation_date, due_date, completed, recurring, group_id, frequency_hours, always_assigned, project_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (title, assigned_to, creation_date, due_date, completed, int(recurring), group_id, frequency_hours, always_assigned, project_id))
         conn.commit()
         new_id = cursor.lastrowid
         log(f"[api_create_task] Task inserted with id={new_id}")
@@ -800,7 +787,8 @@ def api_create_task():
             "recurring": bool(row["recurring"]),
             "frequency_hours": row["frequency_hours"],
             "always_assigned": bool(row["always_assigned"]),
-            "group_id": row["group_id"]
+            "group_id": row["group_id"],
+            "project_id": row["project_id"]
         }
         log(f"[api_create_task] Successfully created task: {task}")
         return jsonify(task), 201
@@ -903,7 +891,11 @@ def api_get_projects():
     log("[api/projects] Fetching projects...")
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM projects")
+    group_id = request.args.get("group_id")
+    if group_id:
+        cursor.execute("SELECT * FROM projects WHERE group_id=?", (group_id,))
+    else:
+        cursor.execute("SELECT * FROM projects")
     projects_rows = cursor.fetchall()
     projects_list = []
     for proj in projects_rows:
@@ -913,6 +905,7 @@ def api_get_projects():
             "description": proj["description"],
             "created_by": proj["created_by"],
             "creation_date": proj["creation_date"],
+            "group_id": proj["group_id"],
             "todos": []
         }
         cursor.execute("SELECT * FROM project_todos WHERE project_id=?", (proj["id"],))
@@ -931,6 +924,10 @@ def api_get_projects():
                 "completed_by": todo["completed_by"],
                 "completed_on": todo["completed_on"]
             })
+        # Get project assignments
+        cursor.execute("SELECT username FROM project_assignments WHERE project_id=?", (proj["id"],))
+        assignments = [row["username"] for row in cursor.fetchall()]
+        proj_dict["assignments"] = assignments
         projects_list.append(proj_dict)
     conn.close()
     log(f"[api/projects] Found {len(projects_list)} projects")
@@ -939,9 +936,9 @@ def api_get_projects():
 @app.route('/api/projects', methods=['POST'])
 def api_create_project():
     data = request.get_json()
-    if not data or "name" not in data:
-        log("[api/create_project] Project name missing.")
-        return jsonify({"error": "Project name is required"}), 400
+    if not data or "name" not in data or "group_id" not in data:
+        log("[api/create_project] Project name or group_id missing.")
+        return jsonify({"error": "Project name and group_id are required"}), 400
     name = data["name"]
     description = data.get("description", "")
     created_by = data.get("created_by", "Unknown")
@@ -950,9 +947,9 @@ def api_create_project():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO projects (name, description, created_by, creation_date)
-        VALUES (?, ?, ?, ?)
-    """, (name, description, created_by, creation_date))
+        INSERT INTO projects (name, description, created_by, creation_date, group_id)
+        VALUES (?, ?, ?, ?, ?)
+    """, (name, description, created_by, creation_date, data.get("group_id", "default")))
     conn.commit()
     new_id = cursor.lastrowid
     cursor.execute("SELECT * FROM projects WHERE id=?", (new_id,))
@@ -963,7 +960,9 @@ def api_create_project():
         "name": proj["name"],
         "description": proj["description"],
         "created_by": proj["created_by"],
-        "creation_date": proj["creation_date"]
+        "creation_date": proj["creation_date"],
+        "group_id": proj["group_id"],
+        "assignments": []
     }
     log(f"[api/create_project] Project created with id={new_id}")
     return jsonify(project), 201
@@ -1017,11 +1016,18 @@ def api_convert_project_todo(project_id, todo_id):
     assigned_to = data["assigned_to"]
     duration_hours = int(data["duration_hours"])
     points = int(data["points"])
+    # Check project assignments – if any exist, the assigned_to must be allowed.
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT username FROM project_assignments WHERE project_id=?", (project_id,))
+    allowed = [row["username"] for row in cursor.fetchall()]
+    if allowed and (assigned_to not in allowed):
+        conn.close()
+        log(f"[api/convert_project_todo] Assigned user {assigned_to} is not allowed for project {project_id}. Allowed: {allowed}")
+        return jsonify({"error": "User not allowed for this project"}), 403
     log(f"[api/convert_project_todo] Converting todo {todo_id} in project {project_id} to aufgabe: assigned_to={assigned_to}, duration_hours={duration_hours}, points={points}")
     creation_date = datetime.utcnow()
     due_date = creation_date + timedelta(hours=duration_hours)
-    conn = get_db_connection()
-    cursor = conn.cursor()
     cursor.execute("""
         UPDATE project_todos
         SET is_task=1, assigned_to=?, due_date=?, points=?
@@ -1057,9 +1063,9 @@ def api_export_projects_csv():
     projects = cursor.fetchall()
     si = io.StringIO()
     cw = csv.writer(si)
-    cw.writerow(["id", "name", "description", "created_by", "creation_date"])
+    cw.writerow(["id", "name", "description", "created_by", "creation_date", "group_id"])
     for proj in projects:
-        cw.writerow([proj["id"], proj["name"], proj["description"], proj["created_by"], proj["creation_date"]])
+        cw.writerow([proj["id"], proj["name"], proj["description"], proj["created_by"], proj["creation_date"], proj["group_id"]])
     conn.close()
     output = io.BytesIO()
     output.write(si.getvalue().encode("utf-8"))
@@ -1075,14 +1081,163 @@ def api_export_projects_xlsx():
     projects = cursor.fetchall()
     si = io.StringIO()
     cw = csv.writer(si)
-    cw.writerow(["id", "name", "description", "created_by", "creation_date"])
+    cw.writerow(["id", "name", "description", "created_by", "creation_date", "group_id"])
     for proj in projects:
-        cw.writerow([proj["id"], proj["name"], proj["description"], proj["created_by"], proj["creation_date"]])
+        cw.writerow([proj["id"], proj["name"], proj["description"], proj["created_by"], proj["creation_date"], proj["group_id"]])
     conn.close()
     output = io.BytesIO()
     output.write(si.getvalue().encode("utf-8"))
     output.seek(0)
     return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name="projects.xlsx")
+
+# --- New Endpoints for Project Assignments ---
+
+@app.route('/api/projects/<int:project_id>/assignments', methods=['GET'])
+def api_get_project_assignments(project_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT username FROM project_assignments WHERE project_id=?", (project_id,))
+        rows = cursor.fetchall()
+        assignments = [row["username"] for row in rows]
+        conn.close()
+        log(f"[api_get_project_assignments] Returning assignments for project {project_id}: {assignments}")
+        return jsonify(assignments), 200
+    except Exception as e:
+        log(f"[api_get_project_assignments] Exception: {e}")
+        return jsonify({"error": "Internal server error during fetching project assignments"}), 500
+
+@app.route('/api/projects/<int:project_id>/assignments', methods=['POST'])
+@requires_permission("assign_projects")
+def api_add_project_assignment(project_id):
+    try:
+        data = request.get_json() or {}
+        username = data.get("username")
+        if not username:
+            return jsonify({"error": "Username required"}), 400
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM project_assignments WHERE project_id=? AND username=?", (project_id, username))
+        if cursor.fetchone():
+            conn.close()
+            return jsonify({"error": "User already assigned"}), 400
+        cursor.execute("INSERT INTO project_assignments (project_id, username) VALUES (?, ?)", (project_id, username))
+        conn.commit()
+        conn.close()
+        log(f"[api_add_project_assignment] Added {username} to project {project_id}")
+        return jsonify({"status": "ok"}), 201
+    except Exception as e:
+        log(f"[api_add_project_assignment] Exception: {e}")
+        return jsonify({"error": "Internal server error during assigning user to project"}), 500
+
+@app.route('/api/projects/<int:project_id>/assignments/<username>', methods=['DELETE'])
+@requires_permission("assign_projects")
+def api_remove_project_assignment(project_id, username):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM project_assignments WHERE project_id=? AND username=?", (project_id, username))
+        conn.commit()
+        conn.close()
+        log(f"[api_remove_project_assignment] Removed {username} from project {project_id}")
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        log(f"[api_remove_project_assignment] Exception: {e}")
+        return jsonify({"error": "Internal server error during removing project assignment"}), 500
+
+# --- History / Archiving Endpoints ---
+@app.route('/api/history', methods=['GET'])
+def api_get_history():
+    group_id = request.args.get("group_id")
+    if not group_id:
+        log("[api_get_history] Missing group_id parameter")
+        return jsonify({"error": "Missing group_id parameter"}), 400
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tasks WHERE completed = 1 AND group_id=?", (group_id,))
+        rows = cursor.fetchall()
+        tasks = [dict(row) for row in rows]
+        conn.close()
+        log(f"[api_get_history] Returning {len(tasks)} archived tasks for group {group_id}")
+        return jsonify(tasks), 200
+    except Exception as e:
+        log(f"[api_get_history] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error during fetching history"}), 500
+
+@app.route('/export_history_csv', methods=['GET'])
+def export_history_csv():
+    group_id = request.args.get("group_id", "default")
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tasks WHERE completed = 1 AND group_id=?", (group_id,))
+        rows = cursor.fetchall()
+        si = io.StringIO()
+        cw = csv.writer(si)
+        cw.writerow(["id", "title", "assigned_to", "creation_date", "due_date", "completed", "completed_by", "completed_on", "recurring", "frequency_hours", "always_assigned", "group_id", "project_id"])
+        for row in rows:
+            cw.writerow([
+                row["id"],
+                row["title"],
+                row["assigned_to"],
+                row["creation_date"],
+                row["due_date"],
+                row["completed"],
+                row["completed_by"],
+                row["completed_on"],
+                row["recurring"],
+                row["frequency_hours"],
+                row["always_assigned"],
+                row["group_id"],
+                row.get("project_id")
+            ])
+        conn.close()
+        output = io.BytesIO()
+        output.write(si.getvalue().encode("utf-8"))
+        output.seek(0)
+        log(f"[export_history_csv] Exported CSV for group_id {group_id}")
+        return send_file(output, mimetype="text/csv", as_attachment=True, download_name="history.csv")
+    except Exception as e:
+        log(f"[export_history_csv] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error during export"}), 500
+
+@app.route('/export_history_xlsx', methods=['GET'])
+def export_history_xlsx():
+    group_id = request.args.get("group_id", "default")
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tasks WHERE completed = 1 AND group_id=?", (group_id,))
+        rows = cursor.fetchall()
+        si = io.StringIO()
+        cw = csv.writer(si)
+        cw.writerow(["id", "title", "assigned_to", "creation_date", "due_date", "completed", "completed_by", "completed_on", "recurring", "frequency_hours", "always_assigned", "group_id", "project_id"])
+        for row in rows:
+            cw.writerow([
+                row["id"],
+                row["title"],
+                row["assigned_to"],
+                row["creation_date"],
+                row["due_date"],
+                row["completed"],
+                row["completed_by"],
+                row["completed_on"],
+                row["recurring"],
+                row["frequency_hours"],
+                row["always_assigned"],
+                row["group_id"],
+                row.get("project_id")
+            ])
+        conn.close()
+        output = io.BytesIO()
+        output.write(si.getvalue().encode("utf-8"))
+        output.seek(0)
+        log(f"[export_history_xlsx] Exported XLSX (CSV formatted) for group_id {group_id}")
+        return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name="history.xlsx")
+    except Exception as e:
+        log(f"[export_history_xlsx] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error during export"}), 500
 
 # --- Heartbeat, OTP, and Registration Endpoints ---
 @app.route('/api/heartbeat', methods=['GET'])

@@ -1,5 +1,3 @@
-// lib/screens/stats_screen.dart, do not remove this line!
-
 import 'package:flutter/material.dart';
 import 'package:flutter_tasktracker/api_service.dart';
 import 'package:flutter_tasktracker/models/stats_response.dart';
@@ -48,12 +46,16 @@ class MultiLineActivity {
 }
 
 /// Updated StatsScreen with a modern, spacious, uncluttered design.
-/// Permanent value labels on bars and clear axis labels ensure the graphs are easy to read.
 class StatsScreen extends StatefulWidget {
   final String currentUser;
+  final String currentGroupId; // NEW: Add group id here
   final VoidCallback onLogout;
-  const StatsScreen({Key? key, required this.currentUser, required this.onLogout})
-      : super(key: key);
+  const StatsScreen({
+    Key? key,
+    required this.currentUser,
+    required this.currentGroupId,
+    required this.onLogout,
+  }) : super(key: key);
 
   @override
   State<StatsScreen> createState() => _StatsScreenState();
@@ -79,7 +81,7 @@ class _StatsScreenState extends State<StatsScreen> {
   List<BarChartGroupData> _mostCompletedBarGroups = [];
   List<FlSpot> _tasksOverTimeSpots = []; // single line
   List<BarChartGroupData> _dayOfWeekBarGroups = [];
-  List<LineChartBarData> _multiLineBarData = []; // multi-line
+  List<LineChartBarData> _multiLineBarData = [];
 
   // The selected bottom bar index.
   // For StatsScreen, we want the "Statistiken" tab (index 1) to be highlighted.
@@ -94,8 +96,8 @@ class _StatsScreenState extends State<StatsScreen> {
   Future<void> _fetchStats() async {
     setState(() => _loading = true);
     try {
-      // Pass a group ID here (for example, "default_group")
-      final resp = await ApiService.getStats("default_group");
+      // Use the passed-in group id from widget.currentGroupId
+      final resp = await ApiService.getStats(widget.currentGroupId);
       setState(() => _stats = resp);
       _buildCharts(resp);
     } catch (e) {
@@ -330,13 +332,13 @@ class _StatsScreenState extends State<StatsScreen> {
   // ---------- MODERN & RESPONSIVE LAYOUT ----------
   @override
   Widget build(BuildContext context) {
-    // Show a loading spinner if needed.
     if (_loading) {
       return Scaffold(
         appBar: AppBar(title: const Text("Statistiken")),
         bottomNavigationBar: CustomBottomBar(
           selectedIndex: _selectedBottomIndex,
           currentUser: widget.currentUser,
+          currentGroupId: widget.currentGroupId,
           onLogout: widget.onLogout,
         ),
         body: const Center(child: CircularProgressIndicator()),
@@ -348,6 +350,7 @@ class _StatsScreenState extends State<StatsScreen> {
         bottomNavigationBar: CustomBottomBar(
           selectedIndex: _selectedBottomIndex,
           currentUser: widget.currentUser,
+          currentGroupId: widget.currentGroupId,
           onLogout: widget.onLogout,
         ),
         body: const Center(child: Text("No stats loaded.")),
@@ -361,12 +364,11 @@ class _StatsScreenState extends State<StatsScreen> {
       bottomNavigationBar: CustomBottomBar(
         selectedIndex: _selectedBottomIndex,
         currentUser: widget.currentUser,
+        currentGroupId: widget.currentGroupId,
         onLogout: widget.onLogout,
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          // On narrow screens, cards will take full width;
-          // on wider screens, show two cards per row.
           final double availableWidth = constraints.maxWidth;
           final double cardWidth = availableWidth < 600 ? availableWidth : (availableWidth / 2) - 24;
 
@@ -820,7 +822,6 @@ class _StatsScreenState extends State<StatsScreen> {
     );
   }
 
-  // ---------- Helper: Pick a color from a preset list ----------
   Color _pickColor(int index) {
     const colors = [
       Colors.blue,
