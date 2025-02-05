@@ -52,6 +52,9 @@ class _PersonalStatsScreenState extends State<PersonalStatsScreen> {
   List<BarChartGroupData> _dailyPerformanceBarGroups = [];
   List<FlSpot> _tasksOverTimeSpots = [];
 
+  // Group id for stats; update this as needed.
+  final String _groupId = "default_group";
+
   @override
   void initState() {
     super.initState();
@@ -63,8 +66,8 @@ class _PersonalStatsScreenState extends State<PersonalStatsScreen> {
   Future<void> _fetchUserStats() async {
     setState(() => _loading = true);
     try {
-      // Get overall stats from the API.
-      final statsResponse = await ApiService.getStats();
+      // Get overall stats from the API. Pass the group id.
+      final statsResponse = await ApiService.getStats(_groupId);
 
       // Filter the "all_tasks" list to those completed by the current user.
       final List<dynamic> allTasks = statsResponse.allTasksRaw;
@@ -330,7 +333,6 @@ class _PersonalStatsScreenState extends State<PersonalStatsScreen> {
                     enabled: true,
                     touchTooltipData: BarTouchTooltipData(
                       tooltipPadding: const EdgeInsets.all(6),
-                      // Removed tooltipBgColor since fl_chart v0.70.2 no longer accepts it.
                       getTooltipItem: (group, groupIndex, rod, rodIndex) {
                         return BarTooltipItem(
                           rod.toY.toInt().toString(),
@@ -352,7 +354,6 @@ class _PersonalStatsScreenState extends State<PersonalStatsScreen> {
                         reservedSize: 30,
                         interval: 1,
                         getTitlesWidget: (value, meta) {
-                          // Use abbreviated weekday labels.
                           final index = value.toInt();
                           if (index < 0 || index >= 7) return const SizedBox.shrink();
                           final day = DateTime.now().subtract(Duration(days: 6 - index));

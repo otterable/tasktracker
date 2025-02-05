@@ -7,6 +7,7 @@ import 'package:flutter_tasktracker/api_service.dart';
 import 'package:flutter_tasktracker/models/task.dart';
 import 'package:flutter_tasktracker/screens/personal_stats_screen.dart';
 import 'package:flutter_tasktracker/screens/stats_screen.dart';
+import 'package:flutter_tasktracker/screens/group_management_screen.dart'; // NEW: Import GroupManagementScreen
 import 'package:flutter_tasktracker/utils.dart';
 import 'package:flutter_tasktracker/notification_service.dart'; // Must be implemented separately
 import 'package:flutter_tasktracker/widgets/custom_bottom_bar.dart'; // Using your custom bottom bar
@@ -39,14 +40,14 @@ class _DashboardScreenState extends State<DashboardScreen>
   int _selectedDuration = 48;
   final List<int> _durations = [12, 24, 48, 72];
 
-  String? _assignedTo;
+  // We now use _selectedActivityUser (instead of _assignedTo) for the assignment dropdown.
+  String? _selectedActivityUser;
+  // (The _assignments list is kept for legacy debug purposes.)
   final List<String?> _assignments = [null, "Wiesel", "Otter"];
 
-  // Additional fields for recurring tasks in the new task panel:
-  // (Task type: Normal or Wiederkehrend)
+  // Additional fields for recurring tasks:
   String _selectedTaskType = "Normal";
   final List<String> _taskTypes = ["Normal", "Wiederkehrend"];
-  // For recurring tasks: frequency options (the default is 24 hours)
   String _selectedFrequencyOption = "24 Stunden";
   final List<String> _frequencyOptions = [
     "24 Stunden",
@@ -58,10 +59,16 @@ class _DashboardScreenState extends State<DashboardScreen>
     "Custom"
   ];
   final _customFrequencyController = TextEditingController();
-  // Option for recurring tasks: always use same assignee or let it be unassigned
   bool _alwaysAssigned = true;
-  // Option to leave task unassigned (for both types)
   bool _unassignedTask = false;
+
+  // New dropdown state: for choosing which group the activity shall be assigned to
+  List<dynamic> _userGroups = [];
+  String _selectedGroupId = "default";
+  // For the new task panel, we allow the user to select a group (it defaults to the global _selectedGroupId)
+  String? _selectedActivityGroupId;
+  // And we need to load the group members for the chosen group:
+  List<dynamic> _groupMembers = [];
 
   // Calendar view and filter settings
   String _calendarView = "Woche";
@@ -79,17 +86,14 @@ class _DashboardScreenState extends State<DashboardScreen>
   int _selectedBottomIndex = 0;
 
   // Slide-out panels:
-  // (1) Task detail panel
   Task? _selectedTask;
   late AnimationController _detailPanelController;
   late Animation<Offset> _detailPanelSlideAnimation;
 
-  // (2) New task creation panel
   bool _showNewTaskPanel = false;
   late AnimationController _newTaskPanelController;
   late Animation<Offset> _newTaskPanelSlideAnimation;
 
-  // (3) Convert task to recurring panel
   bool _showConvertRecurringPanel = false;
   Task? _taskToConvert;
   late AnimationController _convertRecurringPanelController;
@@ -98,8 +102,13 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void initState() {
     super.initState();
-    _fetchAllTasks();
-    _fetchProjects();
+    debugPrint("[Dashboard] initState() called for user: ${widget.currentUser}");
+    // First load the groups for the current user.
+    _fetchUserGroups().then((_) {
+      // Once the groups are fetched, load tasks and projects for the selected group.
+      _fetchAllTasks();
+      _fetchProjects();
+    });
     NotificationService.init(); // Initialize local notifications on start
 
     // Task detail panel controller
@@ -180,10 +189,31 @@ class _DashboardScreenState extends State<DashboardScreen>
     super.dispose();
   }
 
+  // --- Group fetching ---
+  Future<void> _fetchUserGroups() async {
+    try {
+      debugPrint("[Dashboard] Fetching user groups for ${widget.currentUser}");
+      final groups = await ApiService.getUserGroups(widget.currentUser);
+      setState(() {
+        _userGroups = groups;
+        if (groups.isNotEmpty) {
+          // Set the global selected group to the first one if none is selected.
+          _selectedGroupId = groups[0]['id'].toString();
+          // Also update the new task panel group selection.
+          _selectedActivityGroupId = _selectedGroupId;
+        }
+      });
+      debugPrint("[Dashboard] _userGroups: $_userGroups");
+    } catch (e) {
+      debugPrint("[Dashboard] Error fetching user groups: $e");
+    }
+  }
+
   Future<void> _fetchAllTasks() async {
     try {
-      final tasks = await ApiService.getAllTasks();
-      debugPrint("[Dashboard] Fetched ${tasks.length} tasks");
+      debugPrint("[Dashboard] Fetching tasks for group $_selectedGroupId");
+      final tasks = await ApiService.getAllTasks(_selectedGroupId);
+      debugPrint("[Dashboard] Fetched ${tasks.length} tasks for group $_selectedGroupId");
       setState(() {
         allTasks = tasks;
       });
@@ -194,8 +224,9 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Future<void> _fetchProjects() async {
     try {
-      final proj = await ApiService.getProjects();
-      debugPrint("[Dashboard] Fetched ${proj.length} projects");
+      debugPrint("[Dashboard] Fetching projects for group $_selectedGroupId");
+      final proj = await ApiService.getProjects(_selectedGroupId);
+      debugPrint("[Dashboard] Fetched ${proj.length} projects for group $_selectedGroupId");
       setState(() {
         projects = proj;
       });
@@ -207,8 +238,28 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
+  // Fetch members of a given group (for the new task assignee dropdown)
+  Future<void> _fetchGroupMembers(String groupId) async {
+    try {
+      debugPrint("[Dashboard] Fetching group members for group $groupId");
+      final members = await ApiService.getGroupMembers(groupId);
+      setState(() {
+        _groupMembers = members;
+        if (members.isNotEmpty) {
+          _selectedActivityUser = members[0]['username'];
+        } else {
+          _selectedActivityUser = null;
+        }
+      });
+      debugPrint("[Dashboard] _groupMembers: $_groupMembers");
+    } catch (e) {
+      debugPrint("[Dashboard] Error fetching group members: $e");
+    }
+  }
+
   // ================= NOTIFICATIONS =================
   void _scheduleNotifications(Task task, String action) async {
+    debugPrint("[Dashboard] Scheduling notification for task '${task.title}', action=$action");
     if (action == "new" && task.assignedTo != null) {
       final body =
           "Neue Aufgabe '${task.title}' zugewiesen an ${task.assignedTo!}";
@@ -230,18 +281,25 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   // ================= NEW TASK CREATION SLIDE-OUT PANEL =================
   void _openNewTaskPanel() {
+    debugPrint("[Dashboard] _openNewTaskPanel() called");
     setState(() {
       _selectedTitle = "Wäsche";
       _customTitleController.clear();
       _selectedDuration = 48;
-      _assignedTo = null;
+      // Reset assignment fields for new task creation:
       _selectedTaskType = "Normal";
       _selectedFrequencyOption = "24 Stunden";
       _customFrequencyController.clear();
       _alwaysAssigned = true;
       _unassignedTask = false;
       _showNewTaskPanel = true;
+      // For the new task panel, default the group to the global selection:
+      _selectedActivityGroupId = _selectedGroupId;
     });
+    // Fetch the members for the chosen activity group:
+    if (_selectedActivityGroupId != null) {
+      _fetchGroupMembers(_selectedActivityGroupId!);
+    }
     _newTaskPanelController.forward();
   }
 
@@ -260,7 +318,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Pill-shaped colored bar (using the primary color)
+              // Pill-shaped colored bar
               Center(
                 child: Container(
                   width: 60,
@@ -296,7 +354,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ],
               ),
               const SizedBox(height: 8),
-              // Task title
+              // Task title dropdown
               Row(
                 children: [
                   const Text("Aufgabe: ",
@@ -373,8 +431,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                   TextField(
                     controller: _customFrequencyController,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                        labelText: "Eigene Stundenanzahl"),
+                    decoration:
+                        const InputDecoration(labelText: "Eigene Stundenanzahl"),
                   ),
                 ],
                 Row(
@@ -410,12 +468,64 @@ class _DashboardScreenState extends State<DashboardScreen>
                   ],
                 ),
               ],
+              // New: Group selection dropdown inside the task panel.
+              Row(
+                children: [
+                  const Text("Gruppe: ",
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(width: 8),
+                  DropdownButton<String>(
+                    value: _selectedActivityGroupId,
+                    items: _userGroups
+                        .map((group) => DropdownMenuItem<String>(
+                              value: group['id'].toString(),
+                              child: Text(group['name']),
+                            ))
+                        .toList(),
+                    onChanged: (newValue) {
+                      debugPrint("[Dashboard] Activity group changed to: $newValue");
+                      setState(() {
+                        _selectedActivityGroupId = newValue;
+                      });
+                      _fetchGroupMembers(newValue!);
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              // New: Assignment dropdown (only if not unassigned)
+              if (!_unassignedTask)
+                Row(
+                  children: [
+                    const Text("Bearbeiter: ",
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 8),
+                    _groupMembers.isEmpty
+                        ? const Text("Keine Mitglieder gefunden")
+                        : DropdownButton<String>(
+                            value: _selectedActivityUser,
+                            items: _groupMembers
+                                .map((member) => DropdownMenuItem<String>(
+                                      value: member['username'],
+                                      child: Text(member['username']),
+                                    ))
+                                .toList(),
+                            onChanged: (newUser) {
+                              debugPrint("[Dashboard] Assignee changed to: $newUser");
+                              setState(() {
+                                _selectedActivityUser = newUser;
+                              });
+                            },
+                          ),
+                  ],
+                ),
               // Option to leave the task unassigned (joinable)
               Row(
                 children: [
                   Checkbox(
                     value: _unassignedTask,
                     onChanged: (val) {
+                      debugPrint("[Dashboard] _unassignedTask changed to: $val");
                       setState(() {
                         _unassignedTask = val ?? false;
                       });
@@ -435,6 +545,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                           borderRadius: BorderRadius.circular(8)),
                     ),
                     onPressed: () {
+                      debugPrint("[Dashboard] Close new task panel");
                       _newTaskPanelController.reverse();
                     },
                     child: const Text("Schliessen",
@@ -461,6 +572,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _createNewTask() async {
+    debugPrint("[Dashboard] _createNewTask() called");
     String title;
     if (_selectedTitle == "Custom") {
       title = _customTitleController.text.trim();
@@ -473,13 +585,31 @@ class _DashboardScreenState extends State<DashboardScreen>
       title = _selectedTitle;
     }
 
+    // Check that if assignment is required, an assignee is chosen.
+    if (!_unassignedTask && (_selectedActivityUser == null || _selectedActivityUser!.isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Bitte wählen Sie einen Bearbeiter aus.")));
+      return;
+    }
+    // Use the group selected in the new task panel (or fall back to the global selection)
+    final activityGroup = _selectedActivityGroupId ?? _selectedGroupId;
+
+    debugPrint("[Dashboard] Creating task: title=$title, duration=$_selectedDuration, group=$activityGroup, taskType=$_selectedTaskType");
+    if (!_unassignedTask)
+      debugPrint("[Dashboard] Assignee: $_selectedActivityUser");
+    if (_selectedTaskType == "Wiederkehrend")
+      debugPrint("[Dashboard] Frequency option: $_selectedFrequencyOption");
+
     try {
       Task newTask;
       if (_selectedTaskType == "Normal") {
         newTask = await ApiService.createTask(
-            title, _selectedDuration, _unassignedTask ? null : _assignedTo);
+          title,
+          _selectedDuration,
+          _unassignedTask ? null : _selectedActivityUser,
+          activityGroup, // use selected activity group id
+        );
       } else {
-        // For recurring tasks, we call a new API method.
         int frequencyHours = 24;
         if (_selectedFrequencyOption == "Custom") {
           frequencyHours =
@@ -501,11 +631,13 @@ class _DashboardScreenState extends State<DashboardScreen>
         newTask = await ApiService.createRecurringTask(
           title,
           _selectedDuration,
-          _unassignedTask ? null : _assignedTo,
+          _unassignedTask ? null : _selectedActivityUser,
+          activityGroup, // use selected activity group id
           frequencyHours,
           _alwaysAssigned,
         );
       }
+      debugPrint("[Dashboard] New task created successfully: ${newTask.toJson()}");
       await _fetchAllTasks();
       if (newTask.assignedTo != null && newTask.assignedTo!.isNotEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -517,7 +649,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       }
       _newTaskPanelController.reverse();
     } catch (e) {
-      debugPrint("Fehler beim Erstellen der Aufgabe: $e");
+      debugPrint("[Dashboard] Fehler beim Erstellen der Aufgabe: $e");
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Fehler beim Erstellen.")));
     }
@@ -526,13 +658,13 @@ class _DashboardScreenState extends State<DashboardScreen>
   // ================= JOIN TASK (for unassigned tasks) =================
   Future<void> _joinTask(Task task) async {
     try {
-      // Call an API endpoint to join a task (assign it to the current user)
+      debugPrint("[Dashboard] Joining task id=${task.id} for user ${widget.currentUser}");
       Task updatedTask = await ApiService.joinTask(task.id, widget.currentUser);
       await _fetchAllTasks();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text("Aufgabe '${task.title}' wurde dir zugewiesen.")));
     } catch (e) {
-      debugPrint("Fehler beim Beitreten zur Aufgabe: $e");
+      debugPrint("[Dashboard] Fehler beim Beitreten zur Aufgabe: $e");
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Fehler beim Beitreten zur Aufgabe.")));
     }
@@ -540,6 +672,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   // ================= CONVERT TASK TO RECURRING (SLIDE-OUT PANEL) =================
   void _openConvertRecurringPanel(Task task) {
+    debugPrint("[Dashboard] _openConvertRecurringPanel() called for task id=${task.id}");
     setState(() {
       _taskToConvert = task;
       _selectedFrequencyOption = "24 Stunden";
@@ -564,7 +697,6 @@ class _DashboardScreenState extends State<DashboardScreen>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Pill-shaped colored bar
               Center(
                 child: Container(
                   width: 60,
@@ -677,6 +809,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         frequencyHours = 24 * 30;
     }
     try {
+      debugPrint("[Dashboard] Converting task id=${_taskToConvert!.id} to recurring with frequencyHours=$frequencyHours");
       Task convertedTask = await ApiService.convertTaskToRecurring(
           _taskToConvert!.id, frequencyHours, _alwaysAssigned);
       await _fetchAllTasks();
@@ -685,7 +818,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               "Aufgabe '${_taskToConvert!.title}' wurde in eine wiederkehrende Aufgabe umgewandelt.")));
       _convertRecurringPanelController.reverse();
     } catch (e) {
-      debugPrint("Fehler bei der Umwandlung in wiederkehrende Aufgabe: $e");
+      debugPrint("[Dashboard] Fehler bei der Umwandlung in wiederkehrende Aufgabe: $e");
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Fehler bei der Umwandlung.")));
     }
@@ -704,10 +837,9 @@ class _DashboardScreenState extends State<DashboardScreen>
           borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
         ),
         child: Column(
-          mainAxisSize: MainAxisSize.min, // dynamic height based on content
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Pill-shaped colored bar
             Center(
               child: Container(
                 margin: const EdgeInsets.only(top: 8),
@@ -724,7 +856,6 @@ class _DashboardScreenState extends State<DashboardScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header row with title and close icon.
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -826,16 +957,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                               textStyle: const TextStyle(
                                   fontSize: 14, fontWeight: FontWeight.bold),
                             ),
-                            onPressed: () {
-                              _confirmFinishTask(task);
-                            },
+                            onPressed: () => _confirmFinishTask(task),
                             child: const Text("Fertig"),
                           ),
                         ),
                       ],
                     ],
                   ),
-                  // If task is unassigned, show join button
                   if (task.assignedTo == null || task.assignedTo!.isEmpty)
                     Center(
                       child: ElevatedButton(
@@ -860,7 +988,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  // -------------------- Calendar and other sections --------------------
   Widget _buildCalendarViewMenu() {
     return Align(
       alignment: Alignment.centerRight,
@@ -894,7 +1021,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Widget _buildWeekCalendar() {
     final now = DateTime.now();
-    final weekday = now.weekday; // Monday = 1
+    final weekday = now.weekday;
     final monday = now.subtract(Duration(days: weekday - 1));
     final days = List.generate(7, (i) => monday.add(Duration(days: i)));
     return Container(
@@ -923,7 +1050,7 @@ class _DashboardScreenState extends State<DashboardScreen>
         DateTime(_currentMonth.year, _currentMonth.month, 1);
     final daysInMonth =
         DateTime(_currentMonth.year, _currentMonth.month + 1, 0).day;
-    final firstWeekday = firstDayOfMonth.weekday; // 1 = Monday
+    final firstWeekday = firstDayOfMonth.weekday;
     final offset = (firstWeekday - 1) % 7;
     final tiles = <DateTime?>[];
     for (int i = 0; i < offset; i++) {
@@ -1089,7 +1216,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                           subtitle: const Text(""),
                           onTap: () {
                             Navigator.of(ctx).pop();
-                            // Open slide-out detail panel.
                             setState(() {
                               _selectedTask = t;
                             });
@@ -1145,11 +1271,9 @@ class _DashboardScreenState extends State<DashboardScreen>
     return tasks;
   }
 
-  // -------------------- TASK CARD WIDGET (with special marking for unassigned and conversion option) ----------------
   Widget _buildTaskCard(Task task, {bool isCompleted = false, bool hideAssigned = false}) {
     final cardColor = _op(_getTaskColor(task.title), 0.15);
 
-    // Top bar: shows assigned username if available.
     Widget topBar = Container();
     if (!hideAssigned && task.assignedTo != null && task.assignedTo!.isNotEmpty) {
       topBar = Container(
@@ -1193,7 +1317,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       );
     }
 
-    // Build subtitle texts.
     List<Widget> subtitleWidgets = [];
     if (task.creationDate != null && task.creationDate!.isNotEmpty) {
       subtitleWidgets.add(RichText(
@@ -1283,7 +1406,6 @@ class _DashboardScreenState extends State<DashboardScreen>
 
     return InkWell(
       onTap: () {
-        // If the task is unassigned, join it; otherwise open detail panel.
         if (task.assignedTo == null || task.assignedTo!.isEmpty) {
           _joinTask(task);
         } else {
@@ -1312,7 +1434,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  // -------------------- Sections (Offene Aufgaben, Erledigte Aufgaben, Assigned To You, Projects) --------------------
   Widget _buildOffeneAufgabenListe(List<Task> offene) {
     return Card(
       elevation: 4,
@@ -1628,7 +1749,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                     title,
                     description,
                     dueDate.isEmpty ? null : dueDate,
-                    points);
+                    points,
+                    _selectedGroupId // use global group id for project todos
+                    );
                 debugPrint("[Dashboard] Todo erstellt: ${todo}");
                 Navigator.of(context).pop();
                 _fetchProjects();
@@ -1725,7 +1848,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     });
   }
 
-  // -------------------- HELPER METHODS --------------------
   Color _op(Color base, double fraction) {
     final alpha = (fraction * 255).round().clamp(0, 255);
     return base.withAlpha(alpha);
@@ -1738,8 +1860,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (lower.contains("kochen")) return const Color(0xFF9B1C31);
     return Colors.grey;
   }
-
-  // -------------------- MISSING METHODS ADDED BELOW --------------------
 
   void _confirmFinishTask(Task task) {
     showDialog(
@@ -1766,7 +1886,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Future<void> _finishTask(Task task) async {
     try {
-      // Pass the current user as the finisher.
+      debugPrint("[Dashboard] Finishing task id=${task.id} by user ${widget.currentUser}");
       final updatedTask = await ApiService.finishTask(task.id, widget.currentUser);
       await _fetchAllTasks();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1774,7 +1894,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       );
       _scheduleNotifications(updatedTask, "completed");
     } catch (e) {
-      debugPrint("Fehler beim Abschließen der Aufgabe: $e");
+      debugPrint("[Dashboard] Fehler beim Abschließen der Aufgabe: $e");
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Fehler beim Abschließen der Aufgabe.")),
       );
@@ -1801,13 +1921,14 @@ class _DashboardScreenState extends State<DashboardScreen>
               final newTitle = editController.text.trim();
               if (newTitle.isNotEmpty) {
                 try {
+                  debugPrint("[Dashboard] Editing task id=${task.id} newTitle=$newTitle");
                   final updatedTask = await ApiService.editTask(task.id, newTitle);
                   await _fetchAllTasks();
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text("Aufgabe aktualisiert: $newTitle")),
                   );
                 } catch (e) {
-                  debugPrint("Fehler beim Bearbeiten der Aufgabe: $e");
+                  debugPrint("[Dashboard] Fehler beim Bearbeiten der Aufgabe: $e");
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text("Fehler beim Bearbeiten der Aufgabe.")),
                   );
@@ -1847,13 +1968,14 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Future<void> _deleteTask(Task task) async {
     try {
+      debugPrint("[Dashboard] Deleting task id=${task.id}");
       await ApiService.deleteTask(task.id);
       await _fetchAllTasks();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Aufgabe '${task.title}' wurde gelöscht.")),
       );
     } catch (e) {
-      debugPrint("Fehler beim Löschen der Aufgabe: $e");
+      debugPrint("[Dashboard] Fehler beim Löschen der Aufgabe: $e");
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Fehler beim Löschen der Aufgabe.")),
       );
@@ -1861,12 +1983,12 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   void _resendNotification(Task task) {
+    debugPrint("[Dashboard] Resending notification for task id=${task.id}");
     _scheduleNotifications(task, "resend");
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text("Benachrichtigung für Aufgabe '${task.title}' erneut gesendet.")),
     );
   }
-  // -------------------- END OF MISSING METHODS --------------------
 
   @override
   Widget build(BuildContext context) {
@@ -1888,6 +2010,24 @@ class _DashboardScreenState extends State<DashboardScreen>
       appBar: AppBar(
         title: Text("Persönlicher Dashboard: ${widget.currentUser}"),
         actions: [
+          // Group Management Button with refresh callback on return.
+          IconButton(
+            icon: const Icon(Icons.group),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) =>
+                      GroupManagementScreen(currentUser: widget.currentUser),
+                ),
+              ).then((_) async {
+                debugPrint("[Dashboard] Returned from GroupManagementScreen. Refreshing groups...");
+                await _fetchUserGroups();
+                await _fetchAllTasks();
+                await _fetchProjects();
+              });
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: _openNewTaskPanel,
@@ -1897,6 +2037,43 @@ class _DashboardScreenState extends State<DashboardScreen>
             onPressed: widget.onLogout,
           ),
         ],
+        // --- New: Black bar with global group dropdown ---
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(50),
+          child: Container(
+            color: Colors.black,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                const Text("Gruppe: ", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _userGroups.isEmpty
+                      ? const Text("Keine Gruppe gefunden", style: TextStyle(color: Colors.white))
+                      : DropdownButton<String>(
+                          dropdownColor: Colors.black,
+                          style: const TextStyle(color: Colors.white),
+                          value: _selectedGroupId,
+                          onChanged: (newValue) {
+                            debugPrint("[Dashboard] Global group changed to: $newValue");
+                            setState(() {
+                              _selectedGroupId = newValue!;
+                            });
+                            _fetchAllTasks();
+                            _fetchProjects();
+                          },
+                          items: _userGroups.map<DropdownMenuItem<String>>((group) {
+                            return DropdownMenuItem<String>(
+                              value: group['id'].toString(),
+                              child: Text(group['name'], style: const TextStyle(color: Colors.white)),
+                            );
+                          }).toList(),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
       bottomNavigationBar: CustomBottomBar(
         selectedIndex: 0,
@@ -1926,7 +2103,6 @@ class _DashboardScreenState extends State<DashboardScreen>
               ],
             ),
           ),
-          // Slide-out detail panel for selected task.
           if (_selectedTask != null)
             Positioned(
               left: 0,
@@ -1937,7 +2113,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 child: _buildTaskDetailPanel(_selectedTask!),
               ),
             ),
-          // Slide-out new task creation panel.
           if (_showNewTaskPanel)
             Positioned(
               left: 0,
@@ -1948,7 +2123,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 child: _buildNewTaskPanel(),
               ),
             ),
-          // Slide-out convert recurring panel.
           if (_showConvertRecurringPanel)
             Positioned(
               left: 0,
@@ -2015,7 +2189,6 @@ class _CountdownProgressBarState extends State<CountdownProgressBar> {
     super.dispose();
   }
 
-  // Helper to format a Duration as "X h Y m Z s"
   String _formatDuration(Duration d) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
     final hours = d.inHours;
@@ -2086,6 +2259,6 @@ class _CountdownProgressBarState extends State<CountdownProgressBar> {
           ],
         ),
       ),
-    );
+    );  
   }
 }

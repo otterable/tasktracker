@@ -42,4 +42,21 @@ class Task {
       alwaysAssigned: json["always_assigned"] == 1 || json["always_assigned"] == true,
     );
   }
+
+  // Add a toJson() method so that you can print the task as JSON.
+  Map<String, dynamic> toJson() {
+    return {
+      "id": id,
+      "title": title,
+      "assigned_to": assignedTo,
+      "creation_date": creationDate,
+      "due_date": dueDate,
+      "completed": completed,
+      "completed_by": completedBy,
+      "completed_on": completedOn,
+      "recurring": recurring ? 1 : 0,
+      "frequency_hours": frequencyHours,
+      "always_assigned": alwaysAssigned ? 1 : 0,
+    };
+  }
 }

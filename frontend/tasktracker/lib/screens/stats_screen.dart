@@ -94,7 +94,8 @@ class _StatsScreenState extends State<StatsScreen> {
   Future<void> _fetchStats() async {
     setState(() => _loading = true);
     try {
-      final resp = await ApiService.getStats();
+      // Pass a group ID here (for example, "default_group")
+      final resp = await ApiService.getStats("default_group");
       setState(() => _stats = resp);
       _buildCharts(resp);
     } catch (e) {
@@ -219,7 +220,6 @@ class _StatsScreenState extends State<StatsScreen> {
               borderRadius: BorderRadius.circular(4),
             ),
           ],
-          // Force the tooltip (showing the value) to be always visible.
           showingTooltipIndicators: [0],
         ),
       );
@@ -591,7 +591,6 @@ class _StatsScreenState extends State<StatsScreen> {
                     enabled: true,
                     touchTooltipData: BarTouchTooltipData(
                       tooltipPadding: const EdgeInsets.all(6),
-                      // Removed tooltipBackgroundColor parameter since it is not recognized.
                       getTooltipItem: (group, groupIndex, rod, rodIndex) {
                         return BarTooltipItem(
                           rod.toY.toInt().toString(),

@@ -1,11 +1,12 @@
-// lib\screens\group_management_screen.dart, don't remove this line!
+// lib/screens/group_management_screen.dart, don't remove this line!
 import 'package:flutter/material.dart';
 import 'package:flutter_tasktracker/api_service.dart';
 
 class GroupManagementScreen extends StatefulWidget {
   final String currentUser;
 
-  const GroupManagementScreen({Key? key, required this.currentUser}) : super(key: key);
+  const GroupManagementScreen({Key? key, required this.currentUser})
+      : super(key: key);
 
   @override
   _GroupManagementScreenState createState() => _GroupManagementScreenState();
@@ -26,7 +27,7 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
       isLoading = true;
     });
     try {
-      // Assume the backend endpoint returns groups created by the current user
+      // Call the GET endpoint to fetch groups for the current user.
       final result = await ApiService.getUserGroups(widget.currentUser);
       setState(() {
         groups = result;
@@ -69,6 +70,7 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
               final name = groupNameController.text.trim();
               final description = descriptionController.text.trim();
               if (name.isEmpty) return;
+              // Include the currentUser as "creator"
               final result = await ApiService.createGroup(name, description, widget.currentUser);
               if (result != null) {
                 Navigator.of(ctx).pop();
@@ -83,7 +85,7 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
   }
 
   Future<void> _inviteUser(String groupId) async {
-    // Fetch all users to invite (for simplicity, using a fixed list here)
+    // For simplicity, using a fixed list of users.
     List<String> allUsers = await Future.value(["UserA", "UserB", "UserC"]);
     String? selectedUser;
     await showDialog(
@@ -93,7 +95,10 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
         content: DropdownButton<String>(
           value: selectedUser,
           hint: const Text("Benutzer auswählen"),
-          items: allUsers.map((user) => DropdownMenuItem(value: user, child: Text(user))).toList(),
+          items: allUsers
+              .map((user) =>
+                  DropdownMenuItem(value: user, child: Text(user)))
+              .toList(),
           onChanged: (val) {
             setState(() {
               selectedUser = val;
@@ -108,7 +113,8 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
           TextButton(
             onPressed: () async {
               if (selectedUser != null) {
-                final result = await ApiService.inviteUserToGroup(groupId, selectedUser!);
+                final result =
+                    await ApiService.inviteUserToGroup(groupId, selectedUser!);
                 if (result != null) {
                   Navigator.of(ctx).pop();
                   _loadGroups();
@@ -125,7 +131,8 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
   Future<void> _updateUserRole(String groupId, String username, String role) async {
     final result = await ApiService.updateUserRoleInGroup(groupId, username, role);
     if (result != null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Rolle aktualisiert")));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text("Rolle aktualisiert")));
     }
   }
 
@@ -141,10 +148,15 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
           },
         ),
         onTap: () {
-          // Navigate to a detailed view of group members.
+          // Navigate to the group members screen.
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => GroupMembersScreen(groupId: group['id'].toString(), groupName: group['name'])),
+            MaterialPageRoute(
+              builder: (context) => GroupMembersScreen(
+                groupId: group['id'].toString(),
+                groupName: group['name'],
+              ),
+            ),
           );
         },
       ),
@@ -170,7 +182,8 @@ class _GroupManagementScreenState extends State<GroupManagementScreen> {
                     label: const Text("Gruppe erstellen"),
                   ),
                   const SizedBox(height: 16),
-                  const Text("Deine Gruppen:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                  const Text("Deine Gruppen:",
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                   const SizedBox(height: 8),
                   ...groups.map((group) => _buildGroupTile(group)).toList(),
                 ],
@@ -204,7 +217,7 @@ class _GroupMembersScreenState extends State<GroupMembersScreen> {
       isLoading = true;
     });
     try {
-      // Assume a backend endpoint that returns group members.
+      // Call the new GET endpoint for group members.
       final response = await ApiService.getGroupMembers(widget.groupId);
       setState(() {
         members = response;

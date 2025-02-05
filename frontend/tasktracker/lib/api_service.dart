@@ -67,7 +67,6 @@ class ApiService {
   ///  Tasks Endpoints (filtered by active group)
   /// -----------------------
   static Future<List<Task>> getAllTasks(String groupId) async {
-    // Expect the backend to filter tasks by group_id
     debugPrint("[ApiService] GET /api/tasks?group_id=$groupId ...");
     final response = await http.get(Uri.parse("$baseUrl/api/tasks?group_id=$groupId"));
     debugPrint("[ApiService] response code: ${response.statusCode}");
@@ -303,8 +302,6 @@ class ApiService {
   /// -----------------------
   ///  Group & Permission Endpoints
   /// -----------------------
-
-  // Get groups that the current user belongs to.
   static Future<List<dynamic>> getUserGroups(String username) async {
     debugPrint("[ApiService] GET /api/users/$username/groups");
     final response = await http.get(Uri.parse("$baseUrl/api/users/$username/groups"));
@@ -316,7 +313,6 @@ class ApiService {
     }
   }
 
-  // Create a new group; the creator is automatically the group admin.
   static Future<Map<String, dynamic>?> createGroup(String groupName, String description, String creatorUsername) async {
     debugPrint("[ApiService] POST /api/groups => groupName=$groupName, creator=$creatorUsername");
     final bodyData = {
@@ -329,15 +325,17 @@ class ApiService {
       headers: {"Content-Type": "application/json"},
       body: json.encode(bodyData),
     );
+    debugPrint("[ApiService] Response code: ${response.statusCode}");
     if (response.statusCode == 201) {
-      return json.decode(response.body);
+      final data = json.decode(response.body);
+      debugPrint("[ApiService] createGroup successful: $data");
+      return data;
     } else {
       debugPrint("[ApiService] createGroup failed => ${response.body}");
       return null;
     }
   }
 
-  // Invite a user to a group.
   static Future<Map<String, dynamic>?> inviteUserToGroup(String groupId, String inviteeUsername) async {
     debugPrint("[ApiService] POST /api/groups/$groupId/invite => invitee=$inviteeUsername");
     final bodyData = {"invitee": inviteeUsername};
@@ -354,7 +352,6 @@ class ApiService {
     }
   }
 
-  // Update a user’s role in a group (e.g. user, editor, admin)
   static Future<Map<String, dynamic>?> updateUserRoleInGroup(String groupId, String username, String role) async {
     debugPrint("[ApiService] PUT /api/groups/$groupId/users/$username => role=$role");
     final bodyData = {"role": role};
@@ -371,7 +368,6 @@ class ApiService {
     }
   }
 
-  // Export groups (with activities, projects, SOPs) for backup
   static Future<Map<String, dynamic>?> exportGroups(String username) async {
     debugPrint("[ApiService] GET /api/groups/export?username=$username");
     final response = await http.get(Uri.parse("$baseUrl/api/groups/export?username=$username"));
@@ -383,7 +379,6 @@ class ApiService {
     }
   }
 
-  // Import groups data (for backup restoration)
   static Future<Map<String, dynamic>?> importGroups(Map<String, dynamic> data) async {
     debugPrint("[ApiService] POST /api/groups/import");
     final response = await http.post(
@@ -413,7 +408,6 @@ class ApiService {
     debugPrint("[ApiService] register_token response code: ${response.statusCode}");
   }
 
-  // NEW: editTask method to update the task title.
   static Future<Task> editTask(int id, String newTitle) async {
     debugPrint("[ApiService] PUT /api/tasks/$id => newTitle=$newTitle");
     final response = await http.put(
@@ -430,7 +424,6 @@ class ApiService {
     }
   }
 
-  // Additional endpoints for SOPs
   static Future<List<dynamic>> getSops() async {
     debugPrint("[ApiService] GET /api/sops");
     final response = await http.get(Uri.parse("$baseUrl/api/sops"));
@@ -454,6 +447,19 @@ class ApiService {
     } else {
       debugPrint("[ApiService] agreeToSop failed => ${response.body}");
       return null;
+    }
+  }
+
+  static Future<List<dynamic>> getGroupMembers(String groupId) async {
+    debugPrint("[ApiService] GET /api/groups/$groupId/members ...");
+    final response = await http.get(Uri.parse("$baseUrl/api/groups/$groupId/members"));
+    if (response.statusCode == 200) {
+      final list = json.decode(response.body) as List;
+      debugPrint("[ApiService] getGroupMembers returned ${list.length} members");
+      return list;
+    } else {
+      debugPrint("[ApiService] getGroupMembers failed => ${response.body}");
+      throw Exception("Failed to load group members");
     }
   }
 }

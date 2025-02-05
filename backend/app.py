@@ -1,3 +1,4 @@
+import os
 from flask import (
     Flask,
     render_template,
@@ -32,8 +33,9 @@ app.secret_key = "my-very-strong-secret-key"  # Change this to something secure
 # Enable CORS for all routes
 CORS(app)
 
+# Use an absolute path for the database file so that every connection is to the same file.
+DATABASE = os.path.join(app.root_path, 'database.db')
 LIVE_BASE_URL = "https://molentracker.ermine.at"
-DATABASE = 'database.db'
 
 ######################### TWILIO CONFIGURATION #########################
 TWILIO_ACCOUNT_SID = "ACc21e0ab649ebe0280c1cab26ebdb92be"
@@ -124,12 +126,39 @@ def to_datetime_filter(value):
         return None
     return datetime.fromisoformat(value)
 
-# ---------------- Permission and SOP Helper Functions ----------------
+# ---------------- Updated requires_permission Decorator ----------------
+def requires_permission(permission_name):
+    """
+    Decorator to require a given permission.
+    For mobile API calls that don't carry a session cookie,
+    this decorator checks for a "creator" field in the JSON payload
+    and sets session['username'] accordingly.
+    """
+    def decorator(f):
+        def wrapper(*args, **kwargs):
+            data = request.get_json(silent=True) or {}
+            log(f"[requires_permission] Request JSON: {data}")
+            username = session.get('username')
+            if not username:
+                username = data.get("creator")
+                if username:
+                    session['username'] = username
+                    log(f"[requires_permission] Set session username from request data: {username}")
+                else:
+                    log("[requires_permission] Not authenticated: No session and no creator provided in request")
+                    return jsonify({"error": "Not authenticated"}), 401
+            log(f"[requires_permission] Authenticated as: {session.get('username')}")
+            user_perms = get_user_permissions(session.get('username'))
+            log(f"[requires_permission] Permissions for {session.get('username')}: {user_perms}")
+            if permission_name not in user_perms:
+                log(f"[requires_permission] Permission '{permission_name}' required, but user '{session.get('username')}' permissions: {user_perms}")
+                return jsonify({"error": "Permission denied", "required": permission_name}), 403
+            return f(*args, **kwargs)
+        wrapper.__name__ = f.__name__
+        return wrapper
+    return decorator
 
 def get_user_permissions(username: str) -> set:
-    """
-    Load all groups the user belongs to and then aggregate permissions.
-    """
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT group_id FROM user_groups WHERE username=?", (username,))
@@ -150,68 +179,32 @@ def get_user_permissions(username: str) -> set:
     log(f"[get_user_permissions] User '{username}' has permissions: {permissions}")
     return permissions
 
-def requires_permission(permission_name):
-    """
-    Decorator to require a given permission.
-    """
-    def decorator(f):
-        def wrapper(*args, **kwargs):
-            username = session.get('username')
-            if not username:
-                return jsonify({"error": "Not authenticated"}), 401
-            user_perms = get_user_permissions(username)
-            if permission_name not in user_perms:
-                log(f"[requires_permission] User '{username}' missing permission '{permission_name}'")
-                return jsonify({"error": "Permission denied", "required": permission_name}), 403
-            return f(*args, **kwargs)
-        wrapper.__name__ = f.__name__
-        return wrapper
-    return decorator
-
-def requires_sop_agreement(sop_title):
-    """
-    Decorator to ensure the current user has agreed to the latest version of the given SOP.
-    """
-    def decorator(f):
-        def wrapper(*args, **kwargs):
-            username = session.get('username')
-            if not username:
-                return jsonify({"error": "Not authenticated"}), 401
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM sops WHERE title=?", (sop_title,))
-            sop = cursor.fetchone()
-            if not sop:
-                conn.close()
-                return jsonify({"error": f"SOP '{sop_title}' not found"}), 404
-            current_version = sop["version"]
-            cursor.execute("""
-                SELECT * FROM sop_agreements 
-                WHERE username=? AND sop_id=? AND sop_version=?
-            """, (username, sop["id"], current_version))
-            agreement = cursor.fetchone()
-            conn.close()
-            if not agreement:
-                log(f"[requires_sop_agreement] User '{username}' has not agreed to SOP '{sop_title}' version {current_version}")
-                return jsonify({
-                    "error": "SOP agreement required", 
-                    "sop_title": sop_title, 
-                    "version": current_version
-                }), 403
-            return f(*args, **kwargs)
-        wrapper.__name__ = f.__name__
-        return wrapper
-    return decorator
+# ---------------- Helper: Create Table If Not Exists ----------------
+def create_table_if_not_exists(cursor, table_name, create_sql):
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+    result = cursor.fetchone()
+    if result is None:
+        log(f"Table '{table_name}' does not exist. Creating it with SQL: {create_sql}")
+        cursor.execute(create_sql)
+        log(f"Table '{table_name}' created.")
+    else:
+        log(f"Table '{table_name}' already exists.")
 
 # ---------------- Database Initialization ----------------
-
 def init_db():
     log("Initializing database...")
+    new_db = not os.path.exists(DATABASE)
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Create tasks table with recurring fields and group association
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS tasks (
+
+    if new_db:
+        log("No database file found. Creating all tables.")
+    else:
+        log("Database file exists. Running CREATE TABLE IF NOT EXISTS for all tables.")
+
+    # Create tasks table
+    create_table_if_not_exists(cursor, "tasks", '''
+        CREATE TABLE tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
             assigned_to TEXT,
@@ -226,17 +219,17 @@ def init_db():
             group_id TEXT
         )
     ''')
-    # Create device_tokens table for push notifications
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS device_tokens (
+    # Create device_tokens table
+    create_table_if_not_exists(cursor, "device_tokens", '''
+        CREATE TABLE device_tokens (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT,
             token TEXT
         )
     ''')
-    # Create projects table with group association
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS projects (
+    # Create projects table
+    create_table_if_not_exists(cursor, "projects", '''
+        CREATE TABLE projects (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             description TEXT,
@@ -246,8 +239,8 @@ def init_db():
         )
     ''')
     # Create project_todos table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS project_todos (
+    create_table_if_not_exists(cursor, "project_todos", '''
+        CREATE TABLE project_todos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER NOT NULL,
             title TEXT NOT NULL,
@@ -263,17 +256,17 @@ def init_db():
             FOREIGN KEY(project_id) REFERENCES projects(id)
         )
     ''')
-    # Create users table for registration
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
+    # Create users table
+    create_table_if_not_exists(cursor, "users", '''
+        CREATE TABLE users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             phone TEXT UNIQUE NOT NULL,
             username TEXT UNIQUE NOT NULL
         )
     ''')
     # Create groups table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS groups (
+    create_table_if_not_exists(cursor, "groups", '''
+        CREATE TABLE groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL,
             description TEXT,
@@ -281,16 +274,16 @@ def init_db():
         )
     ''')
     # Create permissions table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS permissions (
+    create_table_if_not_exists(cursor, "permissions", '''
+        CREATE TABLE permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE NOT NULL,
             description TEXT
         )
     ''')
     # Create group_permissions mapping table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS group_permissions (
+    create_table_if_not_exists(cursor, "group_permissions", '''
+        CREATE TABLE group_permissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id INTEGER NOT NULL,
             permission_id INTEGER NOT NULL,
@@ -299,8 +292,8 @@ def init_db():
         )
     ''')
     # Create user_groups mapping table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_groups (
+    create_table_if_not_exists(cursor, "user_groups", '''
+        CREATE TABLE user_groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL,
             group_id INTEGER NOT NULL,
@@ -309,8 +302,8 @@ def init_db():
         )
     ''')
     # Create sops table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sops (
+    create_table_if_not_exists(cursor, "sops", '''
+        CREATE TABLE sops (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
             content TEXT,
@@ -321,8 +314,8 @@ def init_db():
         )
     ''')
     # Create sop_agreements table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sop_agreements (
+    create_table_if_not_exists(cursor, "sop_agreements", '''
+        CREATE TABLE sop_agreements (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             sop_id INTEGER NOT NULL,
             username TEXT NOT NULL,
@@ -354,8 +347,15 @@ def get_registered_users():
     log(f"[get_registered_users] Found {len(users)} registered user(s).")
     return users
 
-# ---------------- Group & Permission Management Endpoints ----------------
+# ---------------- After Request: Disable Caching ----------------
+@app.after_request
+def add_header(response):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return response
 
+# ---------------- API Endpoints ----------------
+
+# --- Permissions Endpoints ---
 @app.route('/api/permissions', methods=['GET'])
 @requires_permission("manage_permissions")
 def api_get_permissions():
@@ -364,6 +364,7 @@ def api_get_permissions():
     cursor.execute("SELECT * FROM permissions")
     perms = [dict(row) for row in cursor.fetchall()]
     conn.close()
+    log(f"[api_get_permissions] Returning {len(perms)} permissions")
     return jsonify(perms), 200
 
 @app.route('/api/permissions', methods=['POST'])
@@ -382,187 +383,433 @@ def api_create_permission():
     cursor.execute("SELECT * FROM permissions WHERE id=?", (new_id,))
     perm = dict(cursor.fetchone())
     conn.close()
+    log(f"[api_create_permission] Created permission: {perm}")
     return jsonify(perm), 201
 
-@app.route('/api/groups', methods=['GET'])
-@requires_permission("manage_permissions")
-def api_get_groups():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM groups")
-    groups = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    return jsonify(groups), 200
-
+# --- Groups and User-Group Endpoints ---
 @app.route('/api/groups', methods=['POST'])
-@requires_permission("manage_permissions")
 def api_create_group():
-    data = request.get_json() or {}
-    name = data.get("name", "").strip()
-    description = data.get("description", "")
-    creator = data.get("creator", "")
-    if not name or not creator:
-        return jsonify({"error": "Group name and creator are required"}), 400
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO groups (name, description, creator) VALUES (?, ?, ?)", (name, description, creator))
-    conn.commit()
-    new_id = cursor.lastrowid
-    cursor.execute("SELECT * FROM groups WHERE id=?", (new_id,))
-    group = dict(cursor.fetchone())
-    conn.close()
-    # Also add the creator as admin in user_groups
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO user_groups (username, group_id, role) VALUES (?, ?, ?)", (creator, new_id, "admin"))
-    conn.commit()
-    conn.close()
-    return jsonify(group), 201
+    try:
+        data = request.get_json() or {}
+        log(f"[api_create_group] Received data: {data}")
+        name = data.get("name", "").strip()
+        description = data.get("description", "")
+        creator = data.get("creator", "").strip()
+        if not name or not creator:
+            log("[api_create_group] Missing group name or creator.")
+            return jsonify({"error": "Group name and creator are required"}), 400
+
+        if not session.get("username"):
+            session["username"] = creator
+            log(f"[api_create_group] Session username set to: {creator}")
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        log(f"[api_create_group] Checking for duplicate group with name: {name}")
+        try:
+            cursor.execute("SELECT * FROM groups WHERE name=?", (name,))
+        except sqlite3.OperationalError as err:
+            if "no such table" in str(err):
+                log("[api_create_group] Groups table missing. Recreating it now.")
+                cursor.execute('''
+                    CREATE TABLE groups (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT UNIQUE NOT NULL,
+                        description TEXT,
+                        creator TEXT
+                    )
+                ''')
+                conn.commit()
+                cursor.execute("SELECT * FROM groups WHERE name=?", (name,))
+            else:
+                raise
+        existing_group = cursor.fetchone()
+        if existing_group:
+            log(f"[api_create_group] Group with name '{name}' already exists.")
+            conn.close()
+            return jsonify({"error": "Group with this name already exists"}), 400
+
+        log(f"[api_create_group] Inserting group into database with name: {name}, description: {description}, creator: {creator}")
+        cursor.execute("INSERT INTO groups (name, description, creator) VALUES (?, ?, ?)", (name, description, creator))
+        conn.commit()
+        new_id = cursor.lastrowid
+        log(f"[api_create_group] New group inserted with id: {new_id}")
+        cursor.execute("SELECT * FROM groups WHERE id=?", (new_id,))
+        group = dict(cursor.fetchone())
+        conn.close()
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        log(f"[api_create_group] Inserting into user_groups: username={creator}, group_id={new_id}, role=admin")
+        cursor.execute("INSERT INTO user_groups (username, group_id, role) VALUES (?, ?, ?)", (creator, new_id, "admin"))
+        conn.commit()
+        conn.close()
+        log(f"[api_create_group] Group created successfully with id={new_id} by {creator}")
+        return jsonify(group), 201
+    except Exception as e:
+        log(f"[api_create_group] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error during group creation"}), 500
 
 @app.route('/api/users/<username>/groups', methods=['GET'])
-@requires_permission("manage_permissions")
 def api_get_user_groups(username):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT g.*, ug.role FROM groups g 
-        JOIN user_groups ug ON g.id = ug.group_id 
-        WHERE ug.username=?
-    """, (username,))
-    groups = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    return jsonify(groups), 200
+    try:
+        log(f"[api_get_user_groups] Request for groups for user: {username}")
+        log(f"[api_get_user_groups] Session contents: {dict(session)}")
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT g.*, ug.role FROM groups g 
+            JOIN user_groups ug ON g.id = ug.group_id 
+            WHERE ug.username=?
+        """, (username,))
+        groups = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        log(f"[api_get_user_groups] Returning {len(groups)} groups for {username}")
+        return jsonify(groups), 200
+    except Exception as e:
+        log(f"[api_get_user_groups] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error during fetching user groups"}), 500
 
 @app.route('/api/users/<username>/groups', methods=['POST'])
 @requires_permission("manage_permissions")
 def api_assign_group_to_user(username):
-    data = request.get_json() or {}
-    group_id = data.get("group_id")
-    if not group_id:
-        return jsonify({"error": "Group ID is required"}), 400
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO user_groups (username, group_id, role) VALUES (?, ?, ?)", (username, group_id, "user"))
-    conn.commit()
-    conn.close()
-    return jsonify({"status": "ok", "message": "Group assigned to user"}), 200
+    try:
+        data = request.get_json() or {}
+        group_id = data.get("group_id")
+        if not group_id:
+            log("[api_assign_group_to_user] Group ID missing in request data.")
+            return jsonify({"error": "Group ID is required"}), 400
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        log(f"[api_assign_group_to_user] Assigning group {group_id} to user {username}")
+        cursor.execute("INSERT INTO user_groups (username, group_id, role) VALUES (?, ?, ?)", (username, group_id, "user"))
+        conn.commit()
+        conn.close()
+        log(f"[api_assign_group_to_user] Assigned group {group_id} to user {username}")
+        return jsonify({"status": "ok", "message": "Group assigned to user"}), 200
+    except Exception as e:
+        log(f"[api_assign_group_to_user] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error during assigning group"}), 500
 
 @app.route('/api/groups/<int:group_id>/invite', methods=['POST'])
 @requires_permission("manage_permissions")
 def api_invite_user_to_group(group_id):
-    data = request.get_json() or {}
-    invitee = data.get("invitee", "").strip()
-    if not invitee:
-        return jsonify({"error": "Invitee username is required"}), 400
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO user_groups (username, group_id, role) VALUES (?, ?, ?)", (invitee, group_id, "user"))
-    conn.commit()
-    conn.close()
-    return jsonify({"status": "ok", "message": f"User {invitee} invited to group {group_id}"}), 200
+    try:
+        data = request.get_json() or {}
+        invitee = data.get("invitee", "").strip()
+        if not invitee:
+            log("[api_invite_user_to_group] Missing invitee username.")
+            return jsonify({"error": "Invitee username is required"}), 400
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        log(f"[api_invite_user_to_group] Inviting user {invitee} to group {group_id}")
+        cursor.execute("INSERT INTO user_groups (username, group_id, role) VALUES (?, ?, ?)", (invitee, group_id, "user"))
+        conn.commit()
+        conn.close()
+        log(f"[api_invite_user_to_group] Invited user {invitee} to group {group_id}")
+        return jsonify({"status": "ok", "message": f"User {invitee} invited to group {group_id}"}), 200
+    except Exception as e:
+        log(f"[api_invite_user_to_group] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error during inviting user"}), 500
 
 @app.route('/api/groups/<int:group_id>/users/<username>', methods=['PUT'])
 @requires_permission("manage_permissions")
 def api_update_user_role_in_group(group_id, username):
-    data = request.get_json() or {}
-    role = data.get("role", "").strip()
-    if role not in ["user", "editor", "admin"]:
-        return jsonify({"error": "Invalid role"}), 400
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE user_groups SET role=? WHERE group_id=? AND username=?", (role, group_id, username))
-    conn.commit()
-    conn.close()
-    return jsonify({"status": "ok", "message": "User role updated"}), 200
+    try:
+        data = request.get_json() or {}
+        role = data.get("role", "").strip()
+        if role not in ["user", "editor", "admin"]:
+            log(f"[api_update_user_role_in_group] Invalid role: {role}")
+            return jsonify({"error": "Invalid role"}), 400
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        log(f"[api_update_user_role_in_group] Updating role for user {username} in group {group_id} to {role}")
+        cursor.execute("UPDATE user_groups SET role=? WHERE group_id=? AND username=?", (role, group_id, username))
+        conn.commit()
+        conn.close()
+        log(f"[api_update_user_role_in_group] Updated role for user {username} in group {group_id} to {role}")
+        return jsonify({"status": "ok", "message": "User role updated"}), 200
+    except Exception as e:
+        log(f"[api_update_user_role_in_group] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error during updating user role"}), 500
 
 @app.route('/api/groups/export', methods=['GET'])
 @requires_permission("manage_permissions")
 def api_export_groups():
-    username = request.args.get("username")
-    if not username:
-        return jsonify({"error": "Username is required"}), 400
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT * FROM groups g 
-        JOIN user_groups ug ON g.id = ug.group_id 
-        WHERE ug.username=?
-    """, (username,))
-    groups = [dict(row) for row in cursor.fetchall()]
-    export_data = {"groups": groups, "data": {}}
-    for group in groups:
-        group_id = group["id"]
-        cursor.execute("SELECT * FROM tasks WHERE group_id=?", (group_id,))
-        tasks = [dict(row) for row in cursor.fetchall()]
-        cursor.execute("SELECT * FROM projects WHERE group_id=?", (group_id,))
-        projects = [dict(row) for row in cursor.fetchall()]
-        cursor.execute("SELECT * FROM sops WHERE group_id=?", (group_id,))
-        sops = [dict(row) for row in cursor.fetchall()]
-        export_data["data"][group_id] = {
-            "tasks": tasks,
-            "projects": projects,
-            "sops": sops
-        }
-    conn.close()
-    return jsonify(export_data), 200
+    try:
+        username = request.args.get("username")
+        if not username:
+            log("[api_export_groups] Username is required for export.")
+            return jsonify({"error": "Username is required"}), 400
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM groups g 
+            JOIN user_groups ug ON g.id = ug.group_id 
+            WHERE ug.username=?
+        """, (username,))
+        groups = [dict(row) for row in cursor.fetchall()]
+        export_data = {"groups": groups, "data": {}}
+        for group in groups:
+            group_id = group["id"]
+            cursor.execute("SELECT * FROM tasks WHERE group_id=?", (group_id,))
+            tasks = [dict(row) for row in cursor.fetchall()]
+            cursor.execute("SELECT * FROM projects WHERE group_id=?", (group_id,))
+            projects = [dict(row) for row in cursor.fetchall()]
+            cursor.execute("SELECT * FROM sops WHERE group_id=?", (group_id,))
+            sops = [dict(row) for row in cursor.fetchall()]
+            export_data["data"][group_id] = {
+                "tasks": tasks,
+                "projects": projects,
+                "sops": sops
+            }
+        conn.close()
+        log(f"[api_export_groups] Exported data for user {username}")
+        return jsonify(export_data), 200
+    except Exception as e:
+        log(f"[api_export_groups] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error during exporting groups"}), 500
 
 @app.route('/api/groups/import', methods=['POST'])
 @requires_permission("manage_permissions")
 def api_import_groups():
-    data = request.get_json() or {}
-    username = data.get("username")
-    if not username:
-        return jsonify({"error": "Username is required for import"}), 400
-    imported_data = data.get("data")
-    if not imported_data:
-        return jsonify({"error": "No group data provided"}), 400
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    for group_id_str, group_data in imported_data.items():
-        for task in group_data.get("tasks", []):
-            cursor.execute("""
-                INSERT INTO tasks (title, assigned_to, creation_date, due_date, completed, recurring, frequency_hours, always_assigned, group_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                task["title"],
-                task["assigned_to"],
-                task["creation_date"],
-                task["due_date"],
-                task["completed"],
-                task["recurring"],
-                task["frequency_hours"],
-                task["always_assigned"],
-                group_id_str
-            ))
-        for project in group_data.get("projects", []):
-            cursor.execute("""
-                INSERT INTO projects (name, description, created_by, creation_date, group_id)
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                project["name"],
-                project["description"],
-                project["created_by"],
-                project["creation_date"],
-                group_id_str
-            ))
-        for sop in group_data.get("sops", []):
-            cursor.execute("""
-                INSERT INTO sops (title, content, version, published_date, effective_date, group_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                sop["title"],
-                sop["content"],
-                sop["version"],
-                sop["published_date"],
-                sop["effective_date"],
-                group_id_str
-            ))
-    conn.commit()
-    conn.close()
-    return jsonify({"status": "ok", "message": "Import successful"}), 200
+    try:
+        data = request.get_json() or {}
+        username = data.get("username")
+        if not username:
+            log("[api_import_groups] Username missing in import data.")
+            return jsonify({"error": "Username is required for import"}), 400
+        imported_data = data.get("data")
+        if not imported_data:
+            log("[api_import_groups] No group data provided for import.")
+            return jsonify({"error": "No group data provided"}), 400
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        for group_id_str, group_data in imported_data.items():
+            for task in group_data.get("tasks", []):
+                cursor.execute("""
+                    INSERT INTO tasks (title, assigned_to, creation_date, due_date, completed, recurring, frequency_hours, always_assigned, group_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    task["title"],
+                    task["assigned_to"],
+                    task["creation_date"],
+                    task["due_date"],
+                    task["completed"],
+                    task["recurring"],
+                    task["frequency_hours"],
+                    task["always_assigned"],
+                    group_id_str
+                ))
+            for project in group_data.get("projects", []):
+                cursor.execute("""
+                    INSERT INTO projects (name, description, created_by, creation_date, group_id)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    project["name"],
+                    project["description"],
+                    project["created_by"],
+                    project["creation_date"],
+                    group_id_str
+                ))
+            for sop in group_data.get("sops", []):
+                cursor.execute("""
+                    INSERT INTO sops (title, content, version, published_date, effective_date, group_id)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    sop["title"],
+                    sop["content"],
+                    sop["version"],
+                    sop["published_date"],
+                    sop["effective_date"],
+                    group_id_str
+                ))
+        conn.commit()
+        conn.close()
+        log("[api_import_groups] Import successful")
+        return jsonify({"status": "ok", "message": "Import successful"}), 200
+    except Exception as e:
+        log(f"[api_import_groups] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error during importing groups"}), 500
 
-# ---------------- SOP Management Endpoints ----------------
+@app.route('/api/groups/<group_id>/members', methods=['GET'])
+def api_get_group_members(group_id):
+    try:
+        log(f"[api_get_group_members] Fetching members for group id: {group_id}")
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT username, role FROM user_groups WHERE group_id=?", (group_id,))
+        members = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        log(f"[api_get_group_members] Found {len(members)} members for group id: {group_id}")
+        return jsonify(members), 200
+    except Exception as e:
+        log(f"[api_get_group_members] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error during fetching group members"}), 500
 
+# --- Tasks Endpoints ---
+
+# First, define the recurring task endpoint
+@app.route('/api/tasks/recurring', methods=['POST'])
+def api_create_recurring_task():
+    try:
+        data = request.get_json() or {}
+        log(f"[api_create_recurring_task] Received data: {data}")
+        title = data.get("title", "").strip()
+        group_id = data.get("group_id", "").strip()
+        duration_hours = data.get("duration_hours")
+        assigned_to = data.get("assigned_to")
+        frequency_hours = data.get("frequency_hours")
+        always_assigned = data.get("always_assigned", True)
+
+        if not title or not group_id or duration_hours is None or frequency_hours is None:
+            log("[api_create_recurring_task] Missing required parameters")
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        try:
+            duration_hours = int(duration_hours)
+            frequency_hours = int(frequency_hours)
+        except ValueError:
+            log("[api_create_recurring_task] duration_hours and frequency_hours must be integers")
+            return jsonify({"error": "duration_hours and frequency_hours must be integers"}), 400
+
+        creation_date = datetime.utcnow().isoformat()
+        due_date = (datetime.utcnow() + timedelta(hours=duration_hours)).isoformat()
+        log(f"[api_create_recurring_task] Creating recurring task with title='{title}', creation_date='{creation_date}', due_date='{due_date}', frequency_hours={frequency_hours}, always_assigned={always_assigned}")
+
+        completed = 0
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO tasks 
+            (title, assigned_to, creation_date, due_date, completed, recurring, group_id, frequency_hours, always_assigned)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (title, assigned_to, creation_date, due_date, completed, 1, group_id, frequency_hours, int(always_assigned)))
+        conn.commit()
+        new_id = cursor.lastrowid
+        log(f"[api_create_recurring_task] Recurring task inserted with id={new_id}")
+
+        cursor.execute("SELECT * FROM tasks WHERE id=?", (new_id,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if row is None:
+            log("[api_create_recurring_task] No row returned after insert")
+            return jsonify({"error": "Task creation failed: no row returned"}), 500
+
+        task = {
+            "id": row["id"],
+            "title": row["title"],
+            "assigned_to": row["assigned_to"],
+            "creation_date": row["creation_date"],
+            "due_date": row["due_date"],
+            "completed": row["completed"],
+            "completed_by": row["completed_by"],
+            "completed_on": row["completed_on"],
+            "recurring": bool(row["recurring"]),
+            "frequency_hours": row["frequency_hours"],
+            "always_assigned": bool(row["always_assigned"]),
+            "group_id": row["group_id"]
+        }
+        log(f"[api_create_recurring_task] Successfully created recurring task: {task}")
+        return jsonify(task), 201
+
+    except Exception as e:
+        log(f"[api_create_recurring_task] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+# Next, define the GET and POST endpoints for normal tasks.
+# IMPORTANT: We add unique endpoints so they do not override each other.
+@app.route('/api/tasks', methods=['GET'], endpoint='api_get_tasks')
+def api_get_tasks():
+    group_id = request.args.get("group_id")
+    log(f"[api_get_tasks] Request received for group_id: {group_id}")
+    if not group_id:
+        log("[api_get_tasks] Missing group_id parameter")
+        return jsonify({"error": "Missing group_id parameter"}), 400
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tasks WHERE group_id=?", (group_id,))
+        rows = cursor.fetchall()
+        tasks = [dict(row) for row in rows]
+        conn.close()
+        log(f"[api_get_tasks] Returning {len(tasks)} tasks for group {group_id}")
+        return jsonify(tasks), 200
+    except Exception as e:
+        log(f"[api_get_tasks] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error during fetching tasks"}), 500
+
+@app.route('/api/tasks', methods=['POST'], endpoint='api_create_task')
+def api_create_task():
+    try:
+        data = request.get_json() or {}
+        log(f"[api_create_task] Received data: {data}")
+        title = data.get("title", "").strip()
+        group_id = data.get("group_id", "").strip()
+        duration_hours = data.get("duration_hours")
+        assigned_to = data.get("assigned_to")
+        recurring = data.get("recurring", False)
+
+        if not title or not group_id or duration_hours is None:
+            log("[api_create_task] Missing required parameters: title, group_id, or duration_hours")
+            return jsonify({"error": "Missing required parameters"}), 400
+
+        try:
+            duration_hours = int(duration_hours)
+        except ValueError:
+            log("[api_create_task] duration_hours must be an integer")
+            return jsonify({"error": "duration_hours must be an integer"}), 400
+
+        creation_date = datetime.utcnow().isoformat()
+        due_date = (datetime.utcnow() + timedelta(hours=duration_hours)).isoformat()
+        log(f"[api_create_task] Creating task with title='{title}', creation_date='{creation_date}', due_date='{due_date}', recurring='{recurring}'")
+
+        completed = 0
+        frequency_hours = None
+        always_assigned = 1
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO tasks 
+            (title, assigned_to, creation_date, due_date, completed, recurring, group_id, frequency_hours, always_assigned)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (title, assigned_to, creation_date, due_date, completed, int(recurring), group_id, frequency_hours, always_assigned))
+        conn.commit()
+        new_id = cursor.lastrowid
+        log(f"[api_create_task] Task inserted with id={new_id}")
+
+        cursor.execute("SELECT * FROM tasks WHERE id=?", (new_id,))
+        row = cursor.fetchone()
+        conn.close()
+
+        if row is None:
+            log("[api_create_task] No row returned after insert")
+            return jsonify({"error": "Task creation failed: no row returned"}), 500
+
+        task = {
+            "id": row["id"],
+            "title": row["title"],
+            "assigned_to": row["assigned_to"],
+            "creation_date": row["creation_date"],
+            "due_date": row["due_date"],
+            "completed": row["completed"],
+            "completed_by": row["completed_by"],
+            "completed_on": row["completed_on"],
+            "recurring": bool(row["recurring"]),
+            "frequency_hours": row["frequency_hours"],
+            "always_assigned": bool(row["always_assigned"]),
+            "group_id": row["group_id"]
+        }
+        log(f"[api_create_task] Successfully created task: {task}")
+        return jsonify(task), 201
+
+    except Exception as e:
+        log(f"[api_create_task] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+# --- SOP Endpoints ---
 @app.route('/api/sops', methods=['GET'])
 @requires_permission("manage_sops")
 def api_get_sops():
@@ -571,6 +818,7 @@ def api_get_sops():
     cursor.execute("SELECT * FROM sops")
     sops = [dict(row) for row in cursor.fetchall()]
     conn.close()
+    log(f"[api_get_sops] Returning {len(sops)} SOPs")
     return jsonify(sops), 200
 
 @app.route('/api/sops', methods=['POST'])
@@ -584,6 +832,7 @@ def api_create_sop():
     effective_date = data.get("effective_date", published_date)
     group_id = data.get("group_id")
     if not title or not version or not group_id:
+        log("[api_create_sop] Missing title, version or group_id.")
         return jsonify({"error": "Title, version and group_id are required for SOP"}), 400
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -596,17 +845,20 @@ def api_create_sop():
     cursor.execute("SELECT * FROM sops WHERE id=?", (new_id,))
     sop = dict(cursor.fetchone())
     conn.close()
+    log(f"[api_create_sop] Created SOP with id={new_id}")
     return jsonify(sop), 201
 
 @app.route('/api/sop_agreement', methods=['POST'])
 def api_agree_sop():
     username = session.get("username")
     if not username:
+        log("[api_agree_sop] Not authenticated.")
         return jsonify({"error": "Not authenticated"}), 401
     data = request.get_json() or {}
     sop_id = data.get("sop_id")
     sop_version = data.get("sop_version", "").strip()
     if not sop_id or not sop_version:
+        log("[api_agree_sop] Missing sop_id or sop_version.")
         return jsonify({"error": "sop_id and sop_version are required"}), 400
     agreed_at = datetime.utcnow().isoformat()
     conn = get_db_connection()
@@ -622,14 +874,14 @@ def api_agree_sop():
     log(f"[api_agree_sop] User '{username}' agreed to SOP {sop_id} version {sop_version} at {agreed_at}")
     return jsonify({"status": "ok", "message": "SOP agreed"}), 200
 
-# ---------------- Notification Endpoints ----------------
-
+# --- Notification Endpoint ---
 @app.route('/api/register_token', methods=['POST'])
 def register_token():
     data = request.get_json(silent=True) or {}
     token = data.get("token", "").strip()
     username = data.get("username", "").strip()
     if not token or not username:
+        log("[register_token] Missing token or username.")
         return jsonify({"error": "Missing token or username"}), 400
     log(f"[register_token] Received token for user {username}: {token}")
     conn = get_db_connection()
@@ -645,8 +897,7 @@ def register_token():
     conn.close()
     return jsonify({"status": "ok"}), 200
 
-# -------------------- PROJECTS ENDPOINTS --------------------
-
+# --- Projects Endpoints ---
 @app.route('/api/projects', methods=['GET'])
 def api_get_projects():
     log("[api/projects] Fetching projects...")
@@ -689,6 +940,7 @@ def api_get_projects():
 def api_create_project():
     data = request.get_json()
     if not data or "name" not in data:
+        log("[api/create_project] Project name missing.")
         return jsonify({"error": "Project name is required"}), 400
     name = data["name"]
     description = data.get("description", "")
@@ -720,6 +972,7 @@ def api_create_project():
 def api_create_project_todo(project_id):
     data = request.get_json()
     if not data or "title" not in data:
+        log("[api/create_project_todo] Todo title missing.")
         return jsonify({"error": "Todo title is required"}), 400
     title = data["title"]
     description = data.get("description", "")
@@ -759,6 +1012,7 @@ def api_create_project_todo(project_id):
 def api_convert_project_todo(project_id, todo_id):
     data = request.get_json()
     if not data or "assigned_to" not in data or "duration_hours" not in data or "points" not in data:
+        log("[api/convert_project_todo] Missing parameters for conversion.")
         return jsonify({"error": "assigned_to, duration_hours, and points are required"}), 400
     assigned_to = data["assigned_to"]
     duration_hours = int(data["duration_hours"])
@@ -830,8 +1084,7 @@ def api_export_projects_xlsx():
     output.seek(0)
     return send_file(output, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", as_attachment=True, download_name="projects.xlsx")
 
-# ---------------- FLUTTER / MOBILE API (Duplicate endpoints) ----------------
-
+# --- Heartbeat, OTP, and Registration Endpoints ---
 @app.route('/api/heartbeat', methods=['GET'])
 def api_heartbeat_duplicate():
     log("[api/heartbeat] Called")
@@ -910,8 +1163,7 @@ def api_register():
     log(f"[api/register] Registered new user: {username} with phone {phone}")
     return jsonify({"status": "ok", "username": username}), 200
 
-# ---------------- Run the App ----------------
-
+# Force initialization of the database upon module import.
 init_db()
 
 if __name__ == '__main__':
