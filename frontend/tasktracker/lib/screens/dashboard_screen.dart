@@ -1,5 +1,3 @@
-// lib/screens/dashboard_screen.dart, do not remove this line!
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -7,11 +5,11 @@ import 'package:flutter_tasktracker/api_service.dart';
 import 'package:flutter_tasktracker/models/task.dart';
 import 'package:flutter_tasktracker/screens/personal_stats_screen.dart';
 import 'package:flutter_tasktracker/screens/stats_screen.dart';
-import 'package:flutter_tasktracker/screens/group_management_screen.dart'; // NEW: Import GroupManagementScreen
-import 'package:flutter_tasktracker/screens/history_screen.dart'; // NEW: Import HistoryScreen
+import 'package:flutter_tasktracker/screens/group_management_screen.dart';
+import 'package:flutter_tasktracker/screens/history_screen.dart';
 import 'package:flutter_tasktracker/utils.dart';
-import 'package:flutter_tasktracker/notification_service.dart'; // Must be implemented separately
-import 'package:flutter_tasktracker/widgets/custom_bottom_bar.dart'; // Using your custom bottom bar
+import 'package:flutter_tasktracker/notification_service.dart';
+import 'package:flutter_tasktracker/widgets/custom_bottom_bar.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String currentUser;
@@ -41,9 +39,8 @@ class _DashboardScreenState extends State<DashboardScreen>
   int _selectedDuration = 48;
   final List<int> _durations = [12, 24, 48, 72];
 
-  // We now use _selectedActivityUser (instead of _assignedTo) for the assignment dropdown.
+  // We now use _selectedActivityUser for the assignment dropdown.
   String? _selectedActivityUser;
-  // (The _assignments list is kept for legacy debug purposes.)
   final List<String?> _assignments = [null, "Wiesel", "Otter"];
 
   // Additional fields for recurring tasks:
@@ -66,7 +63,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   // New dropdown state: for choosing which group the activity shall be assigned to
   List<dynamic> _userGroups = [];
   String _selectedGroupId = "default";
-  // For the new task panel, we allow the user to select a group (it defaults to the global _selectedGroupId)
+  // For the new task panel, we allow the user to select a group
   String? _selectedActivityGroupId;
   // And we need to load the group members for the chosen group:
   List<dynamic> _groupMembers = [];
@@ -104,13 +101,11 @@ class _DashboardScreenState extends State<DashboardScreen>
   void initState() {
     super.initState();
     debugPrint("[Dashboard] initState() called for user: ${widget.currentUser}");
-    // First load the groups for the current user.
     _fetchUserGroups().then((_) {
-      // Once the groups are fetched, load tasks and projects for the selected group.
       _fetchAllTasks();
       _fetchProjects();
     });
-    NotificationService.init(); // Initialize local notifications on start
+    NotificationService.init();
 
     // Task detail panel controller
     _detailPanelController = AnimationController(
@@ -198,9 +193,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       setState(() {
         _userGroups = groups;
         if (groups.isNotEmpty) {
-          // Set the global selected group to the first one if none is selected.
           _selectedGroupId = groups[0]['id'].toString();
-          // Also update the new task panel group selection.
           _selectedActivityGroupId = _selectedGroupId;
         }
       });
@@ -262,21 +255,15 @@ class _DashboardScreenState extends State<DashboardScreen>
   void _scheduleNotifications(Task task, String action) async {
     debugPrint("[Dashboard] Scheduling notification for task '${task.title}', action=$action");
     if (action == "new" && task.assignedTo != null) {
-      final body =
-          "Neue Aufgabe '${task.title}' zugewiesen an ${task.assignedTo!}";
+      final body = "Neue Aufgabe '${task.title}' zugewiesen an ${task.assignedTo!}";
       NotificationService.showNotification(title: "Neue Aufgabe", body: body);
     } else if (action == "completed") {
-      final body =
-          "Aufgabe '${task.title}' erledigt von ${task.completedBy}";
-      NotificationService.showNotification(
-          title: "Aufgabe erledigt", body: body);
+      final body = "Aufgabe '${task.title}' erledigt von ${task.completedBy}";
+      NotificationService.showNotification(title: "Aufgabe erledigt", body: body);
     } else if (action == "edited") {
-      NotificationService.showNotification(
-          title: "Aufgabe geändert",
-          body: "Die Aufgabe '${task.title}' wurde bearbeitet.");
+      NotificationService.showNotification(title: "Aufgabe geändert", body: "Die Aufgabe '${task.title}' wurde bearbeitet.");
     } else if (action == "resend") {
-      NotificationService.showNotification(
-          title: "Benachr. erneut gesendet", body: "Aufgabe: ${task.title}");
+      NotificationService.showNotification(title: "Benachr. erneut gesendet", body: "Aufgabe: ${task.title}");
     }
   }
 
@@ -287,17 +274,14 @@ class _DashboardScreenState extends State<DashboardScreen>
       _selectedTitle = "Wäsche";
       _customTitleController.clear();
       _selectedDuration = 48;
-      // Reset assignment fields for new task creation:
       _selectedTaskType = "Normal";
       _selectedFrequencyOption = "24 Stunden";
       _customFrequencyController.clear();
       _alwaysAssigned = true;
       _unassignedTask = false;
       _showNewTaskPanel = true;
-      // For the new task panel, default the group to the global selection:
       _selectedActivityGroupId = _selectedGroupId;
     });
-    // Fetch the members for the chosen activity group:
     if (_selectedActivityGroupId != null) {
       _fetchGroupMembers(_selectedActivityGroupId!);
     }
@@ -319,7 +303,6 @@ class _DashboardScreenState extends State<DashboardScreen>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Pill-shaped colored bar
               Center(
                 child: Container(
                   width: 60,
@@ -334,7 +317,6 @@ class _DashboardScreenState extends State<DashboardScreen>
               const Text("Neue Aufgabe erstellen",
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
-              // Task type dropdown (Normal vs Wiederkehrend)
               Row(
                 children: [
                   const Text("Aufgabentyp: ",
@@ -355,7 +337,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ],
               ),
               const SizedBox(height: 8),
-              // Task title dropdown
               Row(
                 children: [
                   const Text("Aufgabe: ",
@@ -384,7 +365,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ),
               ],
               const SizedBox(height: 8),
-              // For Normal tasks: duration dropdown
               if (_selectedTaskType == "Normal") ...[
                 Row(
                   children: [
@@ -406,7 +386,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   ],
                 ),
               ],
-              // For recurring tasks: frequency dropdown and expiration duration
               if (_selectedTaskType == "Wiederkehrend") ...[
                 Row(
                   children: [
@@ -415,6 +394,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                     const SizedBox(width: 8),
                     DropdownButton<String>(
                       value: _selectedFrequencyOption,
+                      dropdownColor: Colors.white,
+                      style: const TextStyle(color: Colors.black),
                       items: _frequencyOptions
                           .map((option) => DropdownMenuItem(
                               value: option, child: Text(option)))
@@ -469,7 +450,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                   ],
                 ),
               ],
-              // New: Group selection dropdown inside the task panel.
               Row(
                 children: [
                   const Text("Gruppe: ",
@@ -477,12 +457,19 @@ class _DashboardScreenState extends State<DashboardScreen>
                   const SizedBox(width: 8),
                   DropdownButton<String>(
                     value: _selectedActivityGroupId,
-                    items: _userGroups
-                        .map((group) => DropdownMenuItem<String>(
-                              value: group['id'].toString(),
-                              child: Text(group['name']),
-                            ))
-                        .toList(),
+                    dropdownColor: Colors.white,
+                    style: const TextStyle(color: Colors.black),
+                    items: _userGroups.map<DropdownMenuItem<String>>((group) {
+                      String displayText =
+                          "${group['name']} (${group['open_task_count']} offene Aufgaben)";
+                      return DropdownMenuItem<String>(
+                        value: group['id'].toString(),
+                        child: Text(
+                          displayText,
+                          style: const TextStyle(color: Colors.black),
+                        ),
+                      );
+                    }).toList(),
                     onChanged: (newValue) {
                       debugPrint("[Dashboard] Activity group changed to: $newValue");
                       setState(() {
@@ -494,7 +481,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 ],
               ),
               const SizedBox(height: 8),
-              // New: Assignment dropdown (only if not unassigned)
               if (!_unassignedTask)
                 Row(
                   children: [
@@ -505,6 +491,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                         ? const Text("Keine Mitglieder gefunden")
                         : DropdownButton<String>(
                             value: _selectedActivityUser,
+                            dropdownColor: Colors.white,
+                            style: const TextStyle(color: Colors.black),
                             items: _groupMembers
                                 .map((member) => DropdownMenuItem<String>(
                                       value: member['username'],
@@ -520,7 +508,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                           ),
                   ],
                 ),
-              // Option to leave the task unassigned (joinable)
               Row(
                 children: [
                   Checkbox(
@@ -585,22 +572,17 @@ class _DashboardScreenState extends State<DashboardScreen>
     } else {
       title = _selectedTitle;
     }
-
-    // Check that if assignment is required, an assignee is chosen.
     if (!_unassignedTask && (_selectedActivityUser == null || _selectedActivityUser!.isEmpty)) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Bitte wählen Sie einen Bearbeiter aus.")));
       return;
     }
-    // Use the group selected in the new task panel (or fall back to the global selection)
     final activityGroup = _selectedActivityGroupId ?? _selectedGroupId;
-
     debugPrint("[Dashboard] Creating task: title=$title, duration=$_selectedDuration, group=$activityGroup, taskType=$_selectedTaskType");
     if (!_unassignedTask)
       debugPrint("[Dashboard] Assignee: $_selectedActivityUser");
     if (_selectedTaskType == "Wiederkehrend")
       debugPrint("[Dashboard] Frequency option: $_selectedFrequencyOption");
-
     try {
       Task newTask;
       if (_selectedTaskType == "Normal") {
@@ -608,7 +590,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           title,
           _selectedDuration,
           _unassignedTask ? null : _selectedActivityUser,
-          activityGroup, // use selected activity group id
+          activityGroup,
         );
       } else {
         int frequencyHours = 24;
@@ -633,7 +615,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           title,
           _selectedDuration,
           _unassignedTask ? null : _selectedActivityUser,
-          activityGroup, // use selected activity group id
+          activityGroup,
           frequencyHours,
           _alwaysAssigned,
         );
@@ -657,13 +639,35 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   // ================= JOIN TASK (for unassigned tasks) =================
+  // Removed direct call from task card tap so that slideout is always shown.
+  // The join action is now triggered from within the slideout.
   Future<void> _joinTask(Task task) async {
+    bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text("Aufgabe übernehmen"),
+        content: Text("Möchtest du die Aufgabe '${task.title}' übernehmen?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text("Abbrechen"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text("Ja, übernehmen"),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
     try {
       debugPrint("[Dashboard] Joining task id=${task.id} for user ${widget.currentUser}");
       Task updatedTask = await ApiService.joinTask(task.id, widget.currentUser);
       await _fetchAllTasks();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text("Aufgabe '${task.title}' wurde dir zugewiesen.")));
+      // Optionally, close the slideout after joining:
+      _detailPanelController.reverse();
     } catch (e) {
       debugPrint("[Dashboard] Fehler beim Beitreten zur Aufgabe: $e");
       ScaffoldMessenger.of(context).showSnackBar(
@@ -719,6 +723,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                   const SizedBox(width: 8),
                   DropdownButton<String>(
                     value: _selectedFrequencyOption,
+                    dropdownColor: Colors.white,
+                    style: const TextStyle(color: Colors.black),
                     items: _frequencyOptions
                         .map((option) => DropdownMenuItem(
                             value: option, child: Text(option)))
@@ -815,8 +821,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           _taskToConvert!.id, frequencyHours, _alwaysAssigned);
       await _fetchAllTasks();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-              "Aufgabe '${_taskToConvert!.title}' wurde in eine wiederkehrende Aufgabe umgewandelt.")));
+          content: Text("Aufgabe '${_taskToConvert!.title}' wurde in eine wiederkehrende Aufgabe umgewandelt.")));
       _convertRecurringPanelController.reverse();
     } catch (e) {
       debugPrint("[Dashboard] Fehler bei der Umwandlung in wiederkehrende Aufgabe: $e");
@@ -939,14 +944,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                         ),
                       ),
                     ],
-                  // NEW: If the task is recurring, show an indicator.
                   if (task.recurring == true) ...[
                     const SizedBox(height: 8),
                     Row(
                       children: [
                         const Icon(Icons.repeat, color: Colors.blue),
                         const SizedBox(width: 4),
-                        // Updated here: use task.frequencyHours instead of task.frequency_hours
                         Text("Repeats every ${task.frequencyHours} h", style: const TextStyle(fontStyle: FontStyle.italic)),
                       ],
                     ),
@@ -954,19 +957,15 @@ class _DashboardScreenState extends State<DashboardScreen>
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      Expanded(
-                        child: CountdownProgressBar(
-                          start: DateTime.tryParse(task.creationDate ?? "")?.toLocal() ??
-                              DateTime.now(),
-                          end: DateTime.tryParse(task.dueDate ?? "")?.toLocal() ??
-                              DateTime.now(),
-                          isCompleted: isCompleted,
-                          completedOn: (task.completedOn != null &&
-                                  task.completedOn!.isNotEmpty)
-                              ? DateTime.tryParse(task.completedOn!)?.toLocal()
-                              : null,
-                        ),
-                      ),
+                      Expanded(child: CountdownProgressBar(
+                        start: DateTime.tryParse(task.creationDate ?? "")?.toLocal() ?? DateTime.now(),
+                        end: DateTime.tryParse(task.dueDate ?? "")?.toLocal() ?? DateTime.now(),
+                        isCompleted: isCompleted,
+                        completedOn: (task.completedOn != null &&
+                                task.completedOn!.isNotEmpty)
+                            ? DateTime.tryParse(task.completedOn!)?.toLocal()
+                            : null,
+                      )),
                       if (!isCompleted) ...[
                         const SizedBox(width: 8),
                         SizedBox(
@@ -980,28 +979,22 @@ class _DashboardScreenState extends State<DashboardScreen>
                               textStyle: const TextStyle(
                                   fontSize: 14, fontWeight: FontWeight.bold),
                             ),
-                            onPressed: () => _confirmFinishTask(task),
-                            child: const Text("Fertig"),
+                            onPressed: () {
+                              // If task is unassigned, show "Übernehmen" confirmation; otherwise, show finish confirmation.
+                              if (task.assignedTo == null || task.assignedTo!.isEmpty) {
+                                _joinTask(task);
+                              } else {
+                                _confirmFinishTask(task);
+                              }
+                            },
+                            child: Text(task.assignedTo == null || task.assignedTo!.isEmpty
+                                ? "Übernehmen"
+                                : "Fertig"),
                           ),
                         ),
                       ],
                     ],
                   ),
-                  if (task.assignedTo == null || task.assignedTo!.isEmpty)
-                    Center(
-                      child: ElevatedButton(
-                        onPressed: () {
-                          _joinTask(task);
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                        child: const Text("Join Task",
-                            style: TextStyle(color: Colors.white)),
-                      ),
-                    ),
                 ],
               ),
             ),
@@ -1069,10 +1062,8 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget _buildMonthlyCalendar() {
     final monthFormat = DateFormat('MMMM yyyy', 'de_DE');
     final displayMonth = monthFormat.format(_currentMonth);
-    final firstDayOfMonth =
-        DateTime(_currentMonth.year, _currentMonth.month, 1);
-    final daysInMonth =
-        DateTime(_currentMonth.year, _currentMonth.month + 1, 0).day;
+    final firstDayOfMonth = DateTime(_currentMonth.year, _currentMonth.month, 1);
+    final daysInMonth = DateTime(_currentMonth.year, _currentMonth.month + 1, 0).day;
     final firstWeekday = firstDayOfMonth.weekday;
     final offset = (firstWeekday - 1) % 7;
     final tiles = <DateTime?>[];
@@ -1182,7 +1173,13 @@ class _DashboardScreenState extends State<DashboardScreen>
     final dayNum = date.day;
     final tasksForThisDay = _tasksForDay(date);
     return InkWell(
-      onTap: () => _showDayTasksDialog(date, tasksForThisDay),
+      onTap: () {
+        // Always show the slideout with task details.
+        setState(() {
+          _selectedTask = tasksForThisDay.firstWhere((t) => t.creationDate != null, orElse: () => tasksForThisDay.first);
+        });
+        _detailPanelController.forward();
+      },
       child: Container(
         height: 80,
         decoration: BoxDecoration(
@@ -1296,7 +1293,6 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Widget _buildTaskCard(Task task, {bool isCompleted = false, bool hideAssigned = false}) {
     final cardColor = _op(_getTaskColor(task.title), 0.15);
-
     Widget topBar = Container();
     if (!hideAssigned && task.assignedTo != null && task.assignedTo!.isNotEmpty) {
       topBar = Container(
@@ -1339,7 +1335,6 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
       );
     }
-
     List<Widget> subtitleWidgets = [];
     if (task.creationDate != null && task.creationDate!.isNotEmpty) {
       subtitleWidgets.add(RichText(
@@ -1386,7 +1381,6 @@ class _DashboardScreenState extends State<DashboardScreen>
         completedOn: completedOn?.toLocal(),
       );
     }
-
     Widget taskBody = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Column(
@@ -1425,8 +1419,17 @@ class _DashboardScreenState extends State<DashboardScreen>
                       textStyle: const TextStyle(
                           fontSize: 14, fontWeight: FontWeight.bold),
                     ),
-                    onPressed: () => _confirmFinishTask(task),
-                    child: const Text("Fertig"),
+                    onPressed: () {
+                      // If task is unassigned, show "Übernehmen" confirmation; otherwise, show finish confirmation.
+                      if (task.assignedTo == null || task.assignedTo!.isEmpty) {
+                        _joinTask(task);
+                      } else {
+                        _confirmFinishTask(task);
+                      }
+                    },
+                    child: Text(task.assignedTo == null || task.assignedTo!.isEmpty
+                        ? "Übernehmen"
+                        : "Fertig"),
                   ),
                 ),
               ],
@@ -1435,17 +1438,13 @@ class _DashboardScreenState extends State<DashboardScreen>
         ],
       ),
     );
-
     return InkWell(
       onTap: () {
-        if (task.assignedTo == null || task.assignedTo!.isEmpty) {
-          _joinTask(task);
-        } else {
-          setState(() {
-            _selectedTask = task;
-          });
-          _detailPanelController.forward();
-        }
+        // Always show the slideout with task details.
+        setState(() {
+          _selectedTask = task;
+        });
+        _detailPanelController.forward();
       },
       child: Card(
         color: cardColor,
@@ -1475,18 +1474,15 @@ class _DashboardScreenState extends State<DashboardScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header row with badge.
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text("Offene Aufgaben",
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                         color: Colors.black,
                         borderRadius: BorderRadius.circular(4)),
@@ -1520,11 +1516,9 @@ class _DashboardScreenState extends State<DashboardScreen>
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text("Erledigte Aufgaben",
-                    style:
-                        TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                       color: Colors.black,
                       borderRadius: BorderRadius.circular(4)),
@@ -1574,11 +1568,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text("Meine offene Aufgaben",
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                         color: Colors.black,
                         borderRadius: BorderRadius.circular(4)),
@@ -1610,8 +1602,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text("Projekte",
-                style:
-                    TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             if (projects.isEmpty)
               const Text("Keine Projekte gefunden.")
@@ -1677,10 +1668,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                                "Beschreibung: ${todo["description"] ?? "Keine"}"),
-                            Text(
-                                "Erstellt am: ${todo["creation_date"]}"),
+                            Text("Beschreibung: ${todo["description"] ?? "Keine"}"),
+                            Text("Erstellt am: ${todo["creation_date"]}"),
                             if (todo["due_date"] != null)
                               Text("Fällig bis: ${todo["due_date"]}"),
                             if (isTask && todo["assigned_to"] != null)
@@ -1691,8 +1680,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                         actionsAlignment: MainAxisAlignment.center,
                         actions: [
                           TextButton(
-                            onPressed: () =>
-                                Navigator.of(context).pop(),
+                            onPressed: () => Navigator.of(context).pop(),
                             child: const Text("Schliessen"),
                           ),
                         ],
@@ -1782,7 +1770,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     description,
                     dueDate.isEmpty ? null : dueDate,
                     points,
-                    _selectedGroupId // use global group id for project todos
+                    _selectedGroupId
                     );
                 debugPrint("[Dashboard] Todo erstellt: ${todo}");
                 Navigator.of(context).pop();
@@ -1798,72 +1786,98 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  void _showConvertTodoDialog(int projectId, int todoId) {
-    TextEditingController assignedController = TextEditingController();
-    TextEditingController durationController =
-        TextEditingController(text: "48");
-    TextEditingController pointsController =
-        TextEditingController(text: "0");
+  void _showConvertTodoDialog(int projectId, int todoId) async {
+    TextEditingController durationController = TextEditingController(text: "48");
+    TextEditingController pointsController = TextEditingController(text: "0");
+    List<String> allowedUsers = [];
+    try {
+      allowedUsers = await ApiService.getProjectAssignments(projectId);
+    } catch (e) {
+      debugPrint("[Dashboard] Error fetching project assignments: $e");
+    }
+    if (allowedUsers.isEmpty && _groupMembers.isNotEmpty) {
+      allowedUsers = _groupMembers.map((member) => member['username'] as String).toList();
+    }
+    if (allowedUsers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Keine Berechtigten gefunden für dieses Projekt")),
+      );
+      return;
+    }
+    String selectedAssignment = allowedUsers.first;
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Todo in Aufgabe umwandeln"),
-        content: SingleChildScrollView(
-          child: Column(
-            children: [
-              TextField(
-                controller: assignedController,
-                decoration: const InputDecoration(
-                    labelText: "Zuweisen an (Benutzername)"),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            title: const Text("Todo in Aufgabe umwandeln"),
+            content: SingleChildScrollView(
+              child: Column(
+                children: [
+                  DropdownButton<String>(
+                    value: selectedAssignment,
+                    dropdownColor: Colors.white,
+                    style: const TextStyle(color: Colors.black),
+                    items: allowedUsers
+                        .map((username) => DropdownMenuItem(
+                              value: username,
+                              child: Text(username),
+                            ))
+                        .toList(),
+                    onChanged: (newVal) {
+                      setState(() {
+                        selectedAssignment = newVal!;
+                      });
+                    },
+                  ),
+                  TextField(
+                    controller: durationController,
+                    decoration: const InputDecoration(labelText: "Dauer in Stunden"),
+                    keyboardType: TextInputType.number,
+                  ),
+                  TextField(
+                    controller: pointsController,
+                    decoration: const InputDecoration(labelText: "Punkte"),
+                    keyboardType: TextInputType.number,
+                  ),
+                ],
               ),
-              TextField(
-                controller: durationController,
-                decoration:
-                    const InputDecoration(labelText: "Dauer in Stunden"),
-                keyboardType: TextInputType.number,
+            ),
+            actionsAlignment: MainAxisAlignment.center,
+            actions: [
+              TextButton(
+                onPressed: () {
+                  debugPrint("[Dashboard] Todo conversion cancelled");
+                  Navigator.of(context).pop();
+                },
+                child: const Text("Abbrechen"),
               ),
-              TextField(
-                controller: pointsController,
-                decoration:
-                    const InputDecoration(labelText: "Punkte"),
-                keyboardType: TextInputType.number,
+              TextButton(
+                onPressed: () async {
+                  final duration = int.tryParse(durationController.text.trim()) ?? 48;
+                  final points = int.tryParse(pointsController.text.trim()) ?? 0;
+                  if (selectedAssignment.isEmpty) {
+                    debugPrint("[Dashboard] Kein Benutzer zugewiesen");
+                    return;
+                  }
+                  try {
+                    final converted = await ApiService.convertProjectTodo(
+                        projectId, todoId, selectedAssignment, duration, points);
+                    debugPrint("[Dashboard] Todo umgewandelt: $converted");
+                    Navigator.of(context).pop();
+                    _fetchProjects();
+                  } catch (e) {
+                    debugPrint("[Dashboard] Fehler bei der Umwandlung: $e");
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Fehler bei der Umwandlung.")),
+                    );
+                  }
+                },
+                child: const Text("Umwandeln"),
               ),
             ],
-          ),
-        ),
-        actionsAlignment: MainAxisAlignment.center,
-        actions: [
-          TextButton(
-            onPressed: () {
-              debugPrint("[Dashboard] Umwandlung abgebrochen");
-              Navigator.of(context).pop();
-            },
-            child: const Text("Abbrechen"),
-          ),
-          TextButton(
-            onPressed: () async {
-              final assignedTo = assignedController.text.trim();
-              final duration =
-                  int.tryParse(durationController.text.trim()) ?? 48;
-              final points =
-                  int.tryParse(pointsController.text.trim()) ?? 0;
-              if (assignedTo.isEmpty) {
-                debugPrint("[Dashboard] Kein Benutzer zugewiesen");
-                return;
-              }
-              try {
-                final converted = await ApiService.convertProjectTodo(
-                    projectId, todoId, assignedTo, duration, points);
-                debugPrint("[Dashboard] Todo umgewandelt: ${converted}");
-                Navigator.of(context).pop();
-                _fetchProjects();
-              } catch (e) {
-                debugPrint("[Dashboard] Fehler bei der Umwandlung: $e");
-              }
-            },
-            child: const Text("Umwandeln"),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -2026,12 +2040,9 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   @override
   Widget build(BuildContext context) {
-    debugPrint(
-        "Dashboard build: currentUser='${widget.currentUser}', tasks=${allTasks.length}, projects=${projects.length}");
-    final offeneAufgaben =
-        allTasks.where((t) => t.completed == 0).toList();
-    final completedTasks =
-        allTasks.where((t) => t.completed == 1).toList();
+    debugPrint("Dashboard build: currentUser='${widget.currentUser}', tasks=${allTasks.length}, projects=${projects.length}");
+    final offeneAufgaben = allTasks.where((t) => t.completed == 0).toList();
+    final completedTasks = allTasks.where((t) => t.completed == 1).toList();
     final userAssignedOpenTasks = allTasks.where((t) {
       if (t.completed == 1) return false;
       if (t.assignedTo == null) return false;
@@ -2042,17 +2053,15 @@ class _DashboardScreenState extends State<DashboardScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Text("Persönlicher Dashboard: ${widget.currentUser}"),
+        title: Text("Tasks"),
         actions: [
-          // Group Management Button with refresh callback on return.
           IconButton(
             icon: const Icon(Icons.group),
             onPressed: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) =>
-                      GroupManagementScreen(currentUser: widget.currentUser),
+                  builder: (context) => GroupManagementScreen(currentUser: widget.currentUser),
                 ),
               ).then((_) async {
                 debugPrint("[Dashboard] Returned from GroupManagementScreen. Refreshing groups...");
@@ -2062,7 +2071,6 @@ class _DashboardScreenState extends State<DashboardScreen>
               });
             },
           ),
-          // NEW: History icon – navigates to the new HistoryScreen.
           IconButton(
             icon: const Icon(Icons.history),
             onPressed: () {
@@ -2085,38 +2093,67 @@ class _DashboardScreenState extends State<DashboardScreen>
             onPressed: widget.onLogout,
           ),
         ],
-        // --- New: Black bar with global group dropdown ---
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(50),
+          preferredSize: const Size.fromHeight(56.0),
           child: Container(
-            color: Colors.black,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            height: 56.0,
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            decoration: const BoxDecoration(
+              color: Colors.black,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black45,
+                  offset: Offset(0, 2),
+                  blurRadius: 4,
+                ),
+              ],
+            ),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                const Text("Gruppe: ", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                const SizedBox(width: 8),
+                const Text(
+                  "Gruppe:",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(width: 12.0),
                 Expanded(
-                  child: _userGroups.isEmpty
-                      ? const Text("Keine Gruppe gefunden", style: TextStyle(color: Colors.white))
-                      : DropdownButton<String>(
-                          dropdownColor: Colors.black,
-                          style: const TextStyle(color: Colors.white),
-                          value: _selectedGroupId,
-                          onChanged: (newValue) {
-                            debugPrint("[Dashboard] Global group changed to: $newValue");
-                            setState(() {
-                              _selectedGroupId = newValue!;
-                            });
-                            _fetchAllTasks();
-                            _fetchProjects();
-                          },
-                          items: _userGroups.map<DropdownMenuItem<String>>((group) {
-                            return DropdownMenuItem<String>(
-                              value: group['id'].toString(),
-                              child: Text(group['name'], style: const TextStyle(color: Colors.white)),
-                            );
-                          }).toList(),
-                        ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _selectedGroupId,
+                      dropdownColor: Colors.black,
+                      icon: const Icon(
+                        Icons.keyboard_arrow_down,
+                        color: Colors.white,
+                      ),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                      ),
+                      items: _userGroups.map<DropdownMenuItem<String>>((group) {
+                        String displayText =
+                            "${group['name']} (${group['open_task_count']} offene Aufgaben)";
+                        return DropdownMenuItem<String>(
+                          value: group['id'].toString(),
+                          child: Text(
+                            displayText,
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (newValue) {
+                        debugPrint("[Dashboard] Global group changed to: $newValue");
+                        setState(() {
+                          _selectedGroupId = newValue!;
+                        });
+                        _fetchAllTasks();
+                        _fetchProjects();
+                      },
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -2126,7 +2163,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       bottomNavigationBar: CustomBottomBar(
         selectedIndex: 0,
         currentUser: widget.currentUser,
-        currentGroupId: _selectedGroupId, // NEW: Pass the group id
+        currentGroupId: _selectedGroupId,
         onLogout: widget.onLogout,
       ),
       body: Stack(
@@ -2258,7 +2295,6 @@ class _CountdownProgressBarState extends State<CountdownProgressBar> {
         percent = (elapsed / totalSeconds).clamp(0.0, 1.0);
       }
     }
-
     String label;
     Color progressColor;
     if (widget.isCompleted && widget.completedOn != null) {
@@ -2282,7 +2318,6 @@ class _CountdownProgressBarState extends State<CountdownProgressBar> {
         progressColor = const Color(0xFFFF5C00);
       }
     }
-
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: SizedBox(
@@ -2308,6 +2343,6 @@ class _CountdownProgressBarState extends State<CountdownProgressBar> {
           ],
         ),
       ),
-    );  
+    );
   }
 }

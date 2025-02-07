@@ -324,6 +324,22 @@ def init_db():
         conn.commit()
     conn.close()
     log("Database init complete.")
+    # Now upgrade the tasks table if needed:
+    upgrade_tasks_table()
+
+def upgrade_tasks_table():
+    log("Checking if tasks table needs upgrade for column 'project_id'")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(tasks)")
+    columns = [row["name"] for row in cursor.fetchall()]
+    if "project_id" not in columns:
+        log("Upgrading tasks table: adding 'project_id' column")
+        cursor.execute("ALTER TABLE tasks ADD COLUMN project_id INTEGER")
+        conn.commit()
+    else:
+        log("No upgrade needed for tasks table")
+    conn.close()
 
 def get_registered_users():
     conn = get_db_connection()
@@ -437,6 +453,7 @@ def api_create_group():
         log(f"[api_create_group] Exception occurred: {e}")
         return jsonify({"error": "Internal server error during group creation"}), 500
 
+# --- Modified GET groups endpoint to include open task counts and proper label ---
 @app.route('/api/users/<username>/groups', methods=['GET'])
 def api_get_user_groups(username):
     try:
@@ -445,17 +462,35 @@ def api_get_user_groups(username):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT g.*, ug.role FROM groups g 
+            SELECT g.*, ug.role,
+              (SELECT COUNT(*) FROM tasks WHERE group_id = g.id AND completed = 0) as open_task_count,
+              CASE (SELECT COUNT(*) FROM tasks WHERE group_id = g.id AND completed = 0)
+                   WHEN 1 THEN '1 offene Aufgabe'
+                   ELSE (SELECT COUNT(*) FROM tasks WHERE group_id = g.id AND completed = 0) || ' offene Aufgaben'
+              END as open_task_label
+            FROM groups g 
             JOIN user_groups ug ON g.id = ug.group_id 
             WHERE ug.username=?
         """, (username,))
         groups = [dict(row) for row in cursor.fetchall()]
         conn.close()
         log(f"[api_get_user_groups] Returning {len(groups)} groups for {username}")
+        for group in groups:
+            log(f"[api_get_user_groups] Group '{group['name']}' has {group.get('open_task_count', 0)} open tasks -> label: {group.get('open_task_label')}")
         return jsonify(groups), 200
     except Exception as e:
         log(f"[api_get_user_groups] Exception occurred: {e}")
         return jsonify({"error": "Internal server error during fetching user groups"}), 500
+
+# --- New endpoint to force group refresh ---
+@app.route('/api/groups/refresh', methods=['GET'])
+def api_refresh_groups():
+    username = session.get("username")
+    if not username:
+        log("[api_refresh_groups] No username in session")
+        return jsonify({"error": "Not authenticated"}), 401
+    log(f"[api_refresh_groups] Refreshing groups for user: {username}")
+    return api_get_user_groups(username)
 
 @app.route('/api/users/<username>/groups', methods=['POST'])
 @requires_permission("manage_permissions")
@@ -675,15 +710,12 @@ def api_create_recurring_task():
         conn.commit()
         new_id = cursor.lastrowid
         log(f"[api_create_recurring_task] Recurring task inserted with id={new_id}")
-
         cursor.execute("SELECT * FROM tasks WHERE id=?", (new_id,))
         row = cursor.fetchone()
         conn.close()
-
         if row is None:
             log("[api_create_recurring_task] No row returned after insert")
             return jsonify({"error": "Task creation failed: no row returned"}), 500
-
         task = {
             "id": row["id"],
             "title": row["title"],
@@ -700,8 +732,8 @@ def api_create_recurring_task():
             "project_id": row["project_id"]
         }
         log(f"[api_create_recurring_task] Successfully created recurring task: {task}")
+        log("[api_create_recurring_task] New task created; group counts should now update.")
         return jsonify(task), 201
-
     except Exception as e:
         log(f"[api_create_recurring_task] Exception occurred: {e}")
         return jsonify({"error": "Internal server error"}), 500
@@ -766,15 +798,12 @@ def api_create_task():
         conn.commit()
         new_id = cursor.lastrowid
         log(f"[api_create_task] Task inserted with id={new_id}")
-
         cursor.execute("SELECT * FROM tasks WHERE id=?", (new_id,))
         row = cursor.fetchone()
         conn.close()
-
         if row is None:
             log("[api_create_task] No row returned after insert")
             return jsonify({"error": "Task creation failed: no row returned"}), 500
-
         task = {
             "id": row["id"],
             "title": row["title"],
@@ -791,10 +820,43 @@ def api_create_task():
             "project_id": row["project_id"]
         }
         log(f"[api_create_task] Successfully created task: {task}")
+        log("[api_create_task] New task created; group counts should now update.")
         return jsonify(task), 201
 
     except Exception as e:
         log(f"[api_create_task] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+# --- NEW JOIN TASK ENDPOINT ---
+@app.route('/api/tasks/<int:task_id>/join', methods=['POST'])
+def api_join_task(task_id):
+    try:
+        data = request.get_json() or {}
+        username = data.get("username")
+        if not username:
+            log("[api_join_task] Missing username in join request")
+            return jsonify({"error": "Username is required"}), 400
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
+        task = cursor.fetchone()
+        if not task:
+            conn.close()
+            log(f"[api_join_task] Task with id {task_id} not found")
+            return jsonify({"error": "Task not found"}), 404
+        if task["assigned_to"] and task["assigned_to"].strip() != "":
+            conn.close()
+            log(f"[api_join_task] Task {task_id} is already assigned to {task['assigned_to']}")
+            return jsonify({"error": "Task is already assigned"}), 400
+        cursor.execute("UPDATE tasks SET assigned_to=? WHERE id=?", (username, task_id))
+        conn.commit()
+        cursor.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
+        updated_task = dict(cursor.fetchone())
+        conn.close()
+        log(f"[api_join_task] User {username} joined task {task_id}")
+        return jsonify(updated_task), 200
+    except Exception as e:
+        log(f"[api_join_task] Exception occurred: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
 # --- SOP Endpoints ---
@@ -908,6 +970,7 @@ def api_get_projects():
             "group_id": proj["group_id"],
             "todos": []
         }
+        log(f"[api/projects] Loaded project '{proj_dict['name']}' assigned to group '{proj_dict['group_id']}'")
         cursor.execute("SELECT * FROM project_todos WHERE project_id=?", (proj["id"],))
         todos = cursor.fetchall()
         for todo in todos:
@@ -924,7 +987,6 @@ def api_get_projects():
                 "completed_by": todo["completed_by"],
                 "completed_on": todo["completed_on"]
             })
-        # Get project assignments
         cursor.execute("SELECT username FROM project_assignments WHERE project_id=?", (proj["id"],))
         assignments = [row["username"] for row in cursor.fetchall()]
         proj_dict["assignments"] = assignments
@@ -943,7 +1005,7 @@ def api_create_project():
     description = data.get("description", "")
     created_by = data.get("created_by", "Unknown")
     creation_date = datetime.utcnow().isoformat()
-    log(f"[api/create_project] Creating project: name={name}, created_by={created_by}")
+    log(f"[api/create_project] Creating project: name={name}, created_by={created_by}, group_id={data.get('group_id', 'default')}")
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -964,7 +1026,7 @@ def api_create_project():
         "group_id": proj["group_id"],
         "assignments": []
     }
-    log(f"[api/create_project] Project created with id={new_id}")
+    log(f"[api/create_project] Project created with id={new_id} and assigned to group '{project['group_id']}'")
     return jsonify(project), 201
 
 @app.route('/api/projects/<int:project_id>/todos', methods=['POST'])
@@ -1016,7 +1078,6 @@ def api_convert_project_todo(project_id, todo_id):
     assigned_to = data["assigned_to"]
     duration_hours = int(data["duration_hours"])
     points = int(data["points"])
-    # Check project assignments – if any exist, the assigned_to must be allowed.
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT username FROM project_assignments WHERE project_id=?", (project_id,))

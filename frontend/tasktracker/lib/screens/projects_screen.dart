@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_tasktracker/api_service.dart';
+import 'package:flutter_tasktracker/widgets/custom_bottom_bar.dart';
 
 class ProjectsScreen extends StatefulWidget {
   final String currentUser;
@@ -37,14 +38,15 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   Future<void> _fetchUserGroups() async {
     try {
+      debugPrint("[ProjectsScreen] Fetching user groups for ${widget.currentUser}");
       final groups = await ApiService.getUserGroups(widget.currentUser);
       setState(() {
         _userGroups = groups;
         if (groups.isNotEmpty) {
-          // Use the first group if none is selected.
           _selectedGroupId ??= groups[0]['id'].toString();
         }
       });
+      debugPrint("[ProjectsScreen] Fetched ${_userGroups.length} user groups.");
     } catch (e) {
       debugPrint("Error fetching user groups: $e");
     }
@@ -55,14 +57,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       _isLoading = true;
     });
     try {
-      // Retrieve all projects from the API (the API may return projects for all groups)
+      debugPrint("[ProjectsScreen] Fetching projects for group $_selectedGroupId");
       final allProjects = await ApiService.getProjects(_selectedGroupId!);
-      // Filter the projects to include only those whose "groupId" matches the currently selected group.
+      debugPrint("[ProjectsScreen] API returned ${allProjects.length} projects.");
       final filteredProjects = allProjects.where((project) {
-        // Adjust the key "groupId" if your API returns a different key name (e.g. "group_id")
-        return project['groupId'].toString() == _selectedGroupId;
+        return project['group_id'].toString() == _selectedGroupId;
       }).toList();
-
+      debugPrint("[ProjectsScreen] After filtering, ${filteredProjects.length} projects remain.");
       setState(() {
         projects = filteredProjects;
       });
@@ -152,6 +153,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             ),
           ),
         ),
+      ),
+      bottomNavigationBar: CustomBottomBar(
+        selectedIndex: 1,
+        currentUser: widget.currentUser,
+        currentGroupId: _selectedGroupId ?? '',
+        onLogout: widget.onLogout,
       ),
       body: RefreshIndicator(
         onRefresh: _fetchProjects,
