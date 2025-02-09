@@ -1,6 +1,7 @@
-// lib\screens\registration_screen.dart, do not remove this line!
+// lib/screens/registration_screen.dart, do not remove this line!
 import 'package:flutter/material.dart';
 import 'package:flutter_tasktracker/api_service.dart';
+import 'package:flutter_tasktracker/screens/dashboard_screen.dart'; // NEW: Import the dashboard screen
 
 class RegistrationScreen extends StatefulWidget {
   final String phone;
@@ -32,8 +33,19 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       _isLoading = false;
     });
     if (result != null && result["status"] == "ok") {
-      // Registration successful. Navigate back (or to the dashboard) as desired.
-      Navigator.pop(context);
+      // Registration successful. Navigate directly to the DashboardScreen.
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => DashboardScreen(
+            currentUser: username, // Updated parameter name
+            onLogout: () {
+              // Define your logout logic here. For example, navigate back to the login screen.
+              Navigator.pushReplacementNamed(context, '/login');
+            },
+          ),
+        ),
+      );
     } else {
       setState(() {
         _errorMessage = result?["message"] ?? "Registrierung fehlgeschlagen.";
@@ -61,7 +73,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
               width: 300,
               padding: const EdgeInsets.all(16.0),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.9),
+                color: const Color.fromRGBO(255, 255, 255, 0.9), // Updated: using Color.fromRGBO instead of withOpacity
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Column(

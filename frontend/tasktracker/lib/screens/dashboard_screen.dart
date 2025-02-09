@@ -1,10 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:flutter_tasktracker/api_service.dart';
 import 'package:flutter_tasktracker/models/task.dart';
-import 'package:flutter_tasktracker/screens/personal_stats_screen.dart';
-import 'package:flutter_tasktracker/screens/stats_screen.dart';
 import 'package:flutter_tasktracker/screens/group_management_screen.dart';
 import 'package:flutter_tasktracker/screens/history_screen.dart';
 import 'package:flutter_tasktracker/utils.dart';
@@ -27,9 +24,8 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin {
-  // Regular tasks and projects
+  // Regular tasks
   List<Task> allTasks = [];
-  List<dynamic> projects = [];
 
   // For new task creation (shared with recurring tasks)
   String _selectedTitle = "Wäsche";
@@ -39,9 +35,8 @@ class _DashboardScreenState extends State<DashboardScreen>
   int _selectedDuration = 48;
   final List<int> _durations = [12, 24, 48, 72];
 
-  // We now use _selectedActivityUser for the assignment dropdown.
+  // For assignment dropdown.
   String? _selectedActivityUser;
-  final List<String?> _assignments = [null, "Wiesel", "Otter"];
 
   // Additional fields for recurring tasks:
   String _selectedTaskType = "Normal";
@@ -60,28 +55,17 @@ class _DashboardScreenState extends State<DashboardScreen>
   bool _alwaysAssigned = true;
   bool _unassignedTask = false;
 
-  // New dropdown state: for choosing which group the activity shall be assigned to
+  // Group selection
   List<dynamic> _userGroups = [];
   String _selectedGroupId = "default";
-  // For the new task panel, we allow the user to select a group
+  // In the new task panel, the user may choose a different group.
   String? _selectedActivityGroupId;
-  // And we need to load the group members for the chosen group:
   List<dynamic> _groupMembers = [];
 
-  // Calendar view and filter settings
-  String _calendarView = "Woche";
-  DateTime _currentMonth = DateTime(DateTime.now().year, DateTime.now().month);
-  final List<String> _statRanges = [
-    "Letzte 7 Tage",
-    "Seit Montag",
-    "Letzte 14 Tage",
-    "Letzte 30 Tage",
-    "Aktueller Monat",
-  ];
-  String _selectedCompletedRange = "Letzte 7 Tage";
-
-  // Bottom bar index (Dashboard is index 0)
-  int _selectedBottomIndex = 0;
+  // Project selection (for new task creation)
+  // Now allow null as a valid project option ("Kein Projekt")
+  int? _selectedProjectId;
+  List<dynamic> projects = [];
 
   // Slide-out panels:
   Task? _selectedTask;
@@ -97,13 +81,24 @@ class _DashboardScreenState extends State<DashboardScreen>
   late AnimationController _convertRecurringPanelController;
   late Animation<Offset> _convertRecurringPanelSlideAnimation;
 
+  // Slide-out panels for finishing and joining tasks
+  bool _showFinishTaskPanel = false;
+  Task? _taskToFinish;
+  late AnimationController _finishTaskPanelController;
+  late Animation<Offset> _finishTaskPanelSlideAnimation;
+
+  bool _showJoinTaskPanel = false;
+  Task? _taskToJoin;
+  late AnimationController _joinTaskPanelController;
+  late Animation<Offset> _joinTaskPanelSlideAnimation;
+
   @override
   void initState() {
     super.initState();
     debugPrint("[Dashboard] initState() called for user: ${widget.currentUser}");
     _fetchUserGroups().then((_) {
       _fetchAllTasks();
-      _fetchProjects();
+      _fetchProjects(); // Uses _selectedActivityGroupId if available.
     });
     NotificationService.init();
 
@@ -173,6 +168,52 @@ class _DashboardScreenState extends State<DashboardScreen>
         });
       }
     });
+
+    // Finish task panel controller
+    _finishTaskPanelController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _finishTaskPanelSlideAnimation = Tween<Offset>(
+      begin: const Offset(0, 1),
+      end: const Offset(0, 0),
+    ).animate(
+      CurvedAnimation(
+        parent: _finishTaskPanelController,
+        curve: Curves.easeInOut,
+      ),
+    );
+    _finishTaskPanelController.addStatusListener((status) {
+      if (status == AnimationStatus.dismissed) {
+        setState(() {
+          _showFinishTaskPanel = false;
+          _taskToFinish = null;
+        });
+      }
+    });
+
+    // Join task panel controller
+    _joinTaskPanelController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _joinTaskPanelSlideAnimation = Tween<Offset>(
+      begin: const Offset(0, 1),
+      end: const Offset(0, 0),
+    ).animate(
+      CurvedAnimation(
+        parent: _joinTaskPanelController,
+        curve: Curves.easeInOut,
+      ),
+    );
+    _joinTaskPanelController.addStatusListener((status) {
+      if (status == AnimationStatus.dismissed) {
+        setState(() {
+          _showJoinTaskPanel = false;
+          _taskToJoin = null;
+        });
+      }
+    });
   }
 
   @override
@@ -180,9 +221,94 @@ class _DashboardScreenState extends State<DashboardScreen>
     _detailPanelController.dispose();
     _newTaskPanelController.dispose();
     _convertRecurringPanelController.dispose();
+    _finishTaskPanelController.dispose();
+    _joinTaskPanelController.dispose();
     _customTitleController.dispose();
     _customFrequencyController.dispose();
     super.dispose();
+  }
+
+  // --- Helper Methods ---
+  int? _getTaskProjectId(Task task) {
+    // Assuming that task.toJson() returns a Map containing a key "project_id"
+    final Map<String, dynamic> json = task.toJson();
+    return json['project_id'] as int?;
+  }
+
+  String _getProjectName(int projectId) {
+    final matching = projects.where((proj) => proj['id'] == projectId).toList();
+    if (matching.isNotEmpty) {
+      return matching.first['name'];
+    }
+    return "Unassigned";
+  }
+
+  // New: Open assign-to-project dialog for tasks with no project assigned.
+  void _openAssignProjectPanel(Task task) {
+    int? selectedProjectId =
+        _getTaskProjectId(task) ?? (projects.isNotEmpty ? projects[0]['id'] as int : null);
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (context, setState) {
+          return AlertDialog(
+            title: const Text("Projekt zuweisen"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text("Wähle ein Projekt aus:"),
+                const SizedBox(height: 12),
+                projects.isNotEmpty
+                    ? DropdownButton<int?>(
+                        value: selectedProjectId,
+                        items: [
+                          const DropdownMenuItem<int?>(
+                            value: null,
+                            child: Text("Kein Projekt"),
+                          ),
+                          ...projects.map<DropdownMenuItem<int>>((proj) {
+                            return DropdownMenuItem<int>(
+                              value: proj['id'] as int,
+                              child: Text(proj['name']),
+                            );
+                          }).toList(),
+                        ],
+                        onChanged: (newValue) {
+                          setState(() {
+                            selectedProjectId = newValue;
+                          });
+                        },
+                      )
+                    : const Text("Keine Projekte verfügbar"),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text("Abbrechen"),
+              ),
+              TextButton(
+                onPressed: () async {
+                  try {
+                    debugPrint("[Dashboard] Assigning task id=${task.id} to project id=$selectedProjectId");
+                    await ApiService.editTask(task.id, task.title, projectId: selectedProjectId);
+                    await _fetchAllTasks();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("Aufgabe '${task.title}' wurde zu Projekt zugewiesen.")));
+                  } catch (e) {
+                    debugPrint("[Dashboard] Fehler beim Zuweisen des Projekts: $e");
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Fehler beim Zuweisen des Projekts.")));
+                  }
+                  Navigator.of(ctx).pop();
+                },
+                child: const Text("Zuweisen"),
+              ),
+            ],
+          );
+        });
+      },
+    );
   }
 
   // --- Group fetching ---
@@ -216,21 +342,33 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
-  Future<void> _fetchProjects() async {
-    try {
-      debugPrint("[Dashboard] Fetching projects for group $_selectedGroupId");
-      final proj = await ApiService.getProjects(_selectedGroupId);
-      debugPrint("[Dashboard] Fetched ${proj.length} projects for group $_selectedGroupId");
-      setState(() {
-        projects = proj;
-      });
-    } catch (e) {
-      debugPrint("[Dashboard] Fehler beim Laden der Projekte: $e");
-      setState(() {
-        projects = [];
-      });
-    }
+// Updated _fetchProjects: use _selectedActivityGroupId (if available) and parse project_id as int.
+Future<void> _fetchProjects() async {
+  try {
+    final groupForProjects = _selectedActivityGroupId ?? _selectedGroupId;
+    debugPrint("[Dashboard] Fetching projects for group $groupForProjects");
+    final proj = await ApiService.getProjects(groupForProjects);
+    debugPrint("[Dashboard] Fetched ${proj.length} projects for group $groupForProjects");
+    setState(() {
+      projects = proj;
+      // Allow a "no project" option; parse the first project id if available.
+      if (projects.isNotEmpty) {
+        _selectedProjectId = projects[0]['id'] is int
+            ? projects[0]['id'] as int
+            : int.tryParse(projects[0]['id'].toString());
+      } else {
+        _selectedProjectId = null;
+      }
+    });
+  } catch (e) {
+    debugPrint("[Dashboard] Fehler beim Laden der Projekte: $e");
+    setState(() {
+      projects = [];
+      _selectedProjectId = null;
+    });
   }
+}
+
 
   // Fetch members of a given group (for the new task assignee dropdown)
   Future<void> _fetchGroupMembers(String groupId) async {
@@ -284,6 +422,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     });
     if (_selectedActivityGroupId != null) {
       _fetchGroupMembers(_selectedActivityGroupId!);
+      _fetchProjects();
     }
     _newTaskPanelController.forward();
   }
@@ -450,6 +589,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   ],
                 ),
               ],
+              // Group selection row
               Row(
                 children: [
                   const Text("Gruppe: ",
@@ -476,8 +616,56 @@ class _DashboardScreenState extends State<DashboardScreen>
                         _selectedActivityGroupId = newValue;
                       });
                       _fetchGroupMembers(newValue!);
+                      _fetchProjects().then((_) {
+                        if (projects.isNotEmpty) {
+                          setState(() {
+                            _selectedProjectId = projects[0]['id'] is int
+                                ? projects[0]['id'] as int
+                                : int.tryParse(projects[0]['id'].toString());
+                          });
+                        } else {
+                          setState(() {
+                            _selectedProjectId = null;
+                          });
+                        }
+                      });
                     },
                   ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              // Project selection row with a default option "Kein Projekt"
+              Row(
+                children: [
+                  const Text("Projekt: ",
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(width: 8),
+                  projects.isNotEmpty
+                      ? DropdownButton<int?>(
+                          value: _selectedProjectId,
+                          dropdownColor: Colors.white,
+                          style: const TextStyle(color: Colors.black),
+                          items: [
+                            const DropdownMenuItem<int?>(
+                              value: null,
+                              child: Text("Kein Projekt"),
+                            ),
+                            ...projects.map<DropdownMenuItem<int>>((proj) {
+                              return DropdownMenuItem<int>(
+                                value: proj['id'] is int
+                                    ? proj['id'] as int
+                                    : int.tryParse(proj['id'].toString()),
+                                child: Text(proj['name']),
+                              );
+                            }).toList(),
+                          ],
+                          onChanged: (newValue) {
+                            setState(() {
+                              _selectedProjectId = newValue;
+                            });
+                          },
+                        )
+                      : const Text("Keine Projekte"),
                 ],
               ),
               const SizedBox(height: 8),
@@ -578,11 +766,9 @@ class _DashboardScreenState extends State<DashboardScreen>
       return;
     }
     final activityGroup = _selectedActivityGroupId ?? _selectedGroupId;
-    debugPrint("[Dashboard] Creating task: title=$title, duration=$_selectedDuration, group=$activityGroup, taskType=$_selectedTaskType");
+    debugPrint("[Dashboard] Creating task: title=$title, duration=$_selectedDuration, group=$activityGroup, taskType=$_selectedTaskType, project=$_selectedProjectId");
     if (!_unassignedTask)
       debugPrint("[Dashboard] Assignee: $_selectedActivityUser");
-    if (_selectedTaskType == "Wiederkehrend")
-      debugPrint("[Dashboard] Frequency option: $_selectedFrequencyOption");
     try {
       Task newTask;
       if (_selectedTaskType == "Normal") {
@@ -591,12 +777,12 @@ class _DashboardScreenState extends State<DashboardScreen>
           _selectedDuration,
           _unassignedTask ? null : _selectedActivityUser,
           activityGroup,
+          projectId: _selectedProjectId,
         );
       } else {
         int frequencyHours = 24;
         if (_selectedFrequencyOption == "Custom") {
-          frequencyHours =
-              int.tryParse(_customFrequencyController.text.trim()) ?? 24;
+          frequencyHours = int.tryParse(_customFrequencyController.text.trim()) ?? 24;
         } else {
           if (_selectedFrequencyOption.contains("24"))
             frequencyHours = 24;
@@ -618,6 +804,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           activityGroup,
           frequencyHours,
           _alwaysAssigned,
+          projectId: _selectedProjectId,
         );
       }
       debugPrint("[Dashboard] New task created successfully: ${newTask.toJson()}");
@@ -638,35 +825,193 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
-  // ================= JOIN TASK (for unassigned tasks) =================
-  // Removed direct call from task card tap so that slideout is always shown.
-  // The join action is now triggered from within the slideout.
-  Future<void> _joinTask(Task task) async {
-    bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text("Aufgabe übernehmen"),
-        content: Text("Möchtest du die Aufgabe '${task.title}' übernehmen?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text("Abbrechen"),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text("Ja, übernehmen"),
-          ),
-        ],
+  // ================= NEW: Slide-out panel for finishing a task =================
+  void _openFinishTaskPanel(Task task) {
+    setState(() {
+      _taskToFinish = task;
+      _showFinishTaskPanel = true;
+    });
+    _finishTaskPanelController.forward();
+  }
+
+  Widget _buildFinishTaskPanel() {
+    return Material(
+      elevation: 12,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 60,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).primaryColor,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              "Aufgabe abschließen",
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black),
+            ),
+            const SizedBox(height: 16),
+            if (_taskToFinish != null)
+              Text(
+                "Möchtest du die Aufgabe '${_taskToFinish!.title}' als erledigt markieren?",
+                style: const TextStyle(color: Colors.black),
+              ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFD62728),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () {
+                    _finishTaskPanelController.reverse();
+                  },
+                  child: const Text("Abbrechen", style: TextStyle(color: Colors.white)),
+                ),
+                const SizedBox(width: 16),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4CAF50),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () async {
+                    if (_taskToFinish != null) {
+                      await _finishTask(_taskToFinish!);
+                    }
+                    _finishTaskPanelController.reverse();
+                  },
+                  child: const Text("Bestätigen", style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
-    if (confirmed != true) return;
+  }
+
+  Future<void> _finishTask(Task task) async {
     try {
-      debugPrint("[Dashboard] Joining task id=${task.id} for user ${widget.currentUser}");
-      Task updatedTask = await ApiService.joinTask(task.id, widget.currentUser);
+      debugPrint("[Dashboard] Finishing task id=${task.id} by user ${widget.currentUser}");
+      await ApiService.finishTask(task.id, widget.currentUser);
       await _fetchAllTasks();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text("Aufgabe '${task.title}' wurde dir zugewiesen.")));
-      // Optionally, close the slideout after joining:
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Aufgabe '${task.title}' wurde als erledigt markiert und archiviert.")),
+      );
+      _scheduleNotifications(task, "completed");
+    } catch (e) {
+      debugPrint("[Dashboard] Fehler beim Abschließen der Aufgabe: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Fehler beim Abschließen der Aufgabe.")),
+      );
+    }
+  }
+
+  // ================= NEW: Slide-out panel for joining a task =================
+  void _openJoinTaskPanel(Task task) {
+    setState(() {
+      _taskToJoin = task;
+      _showJoinTaskPanel = true;
+    });
+    _joinTaskPanelController.forward();
+  }
+
+  Widget _buildJoinTaskPanel() {
+    return Material(
+      elevation: 12,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 60,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).primaryColor,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              "Aufgabe übernehmen",
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black),
+            ),
+            const SizedBox(height: 16),
+            if (_taskToJoin != null)
+              Text(
+                "Möchtest du die Aufgabe '${_taskToJoin!.title}' übernehmen?",
+                style: const TextStyle(color: Colors.black),
+              ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFD62728),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () {
+                    _joinTaskPanelController.reverse();
+                  },
+                  child: const Text("Abbrechen", style: TextStyle(color: Colors.white)),
+                ),
+                const SizedBox(width: 16),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4CAF50),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () async {
+                    if (_taskToJoin != null) {
+                      await _performJoinTask(_taskToJoin!);
+                    }
+                    _joinTaskPanelController.reverse();
+                  },
+                  child: const Text("Übernehmen", style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _performJoinTask(Task task) async {
+    try {
+      await ApiService.joinTask(task.id, widget.currentUser);
+      await _fetchAllTasks();
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Aufgabe '${task.title}' wurde dir zugewiesen.")));
       _detailPanelController.reverse();
     } catch (e) {
       debugPrint("[Dashboard] Fehler beim Beitreten zur Aufgabe: $e");
@@ -675,7 +1020,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
-  // ================= CONVERT TASK TO RECURRING (SLIDE-OUT PANEL) =================
+  // ================= NEW: Methods for converting a task to recurring =================
   void _openConvertRecurringPanel(Task task) {
     debugPrint("[Dashboard] _openConvertRecurringPanel() called for task id=${task.id}");
     setState(() {
@@ -683,6 +1028,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       _selectedFrequencyOption = "24 Stunden";
       _customFrequencyController.clear();
       _alwaysAssigned = true;
+      _showConvertRecurringPanel = true;
     });
     _convertRecurringPanelController.forward();
   }
@@ -714,7 +1060,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               ),
               const SizedBox(height: 16),
               const Text("In wiederkehrende Aufgabe umwandeln",
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black)),
               const SizedBox(height: 16),
               Row(
                 children: [
@@ -742,8 +1088,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 TextField(
                   controller: _customFrequencyController,
                   keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                      labelText: "Eigene Stundenanzahl"),
+                  decoration: const InputDecoration(labelText: "Eigene Stundenanzahl"),
                 ),
               ],
               Row(
@@ -772,8 +1117,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     onPressed: () {
                       _convertRecurringPanelController.reverse();
                     },
-                    child: const Text("Abbrechen",
-                        style: TextStyle(color: Colors.white)),
+                    child: const Text("Abbrechen", style: TextStyle(color: Colors.white)),
                   ),
                   const SizedBox(width: 16),
                   ElevatedButton(
@@ -782,9 +1126,11 @@ class _DashboardScreenState extends State<DashboardScreen>
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8)),
                     ),
-                    onPressed: _convertTaskToRecurring,
-                    child: const Text("Umwandeln",
-                        style: TextStyle(color: Colors.white)),
+                    onPressed: () async {
+                      await _convertTaskToRecurring();
+                      _convertRecurringPanelController.reverse();
+                    },
+                    child: const Text("Umwandeln", style: TextStyle(color: Colors.white)),
                   ),
                 ],
               ),
@@ -799,8 +1145,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (_taskToConvert == null) return;
     int frequencyHours = 24;
     if (_selectedFrequencyOption == "Custom") {
-      frequencyHours =
-          int.tryParse(_customFrequencyController.text.trim()) ?? 24;
+      frequencyHours = int.tryParse(_customFrequencyController.text.trim()) ?? 24;
     } else {
       if (_selectedFrequencyOption.contains("24"))
         frequencyHours = 24;
@@ -817,12 +1162,12 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
     try {
       debugPrint("[Dashboard] Converting task id=${_taskToConvert!.id} to recurring with frequencyHours=$frequencyHours");
-      Task convertedTask = await ApiService.convertTaskToRecurring(
+      await ApiService.convertTaskToRecurring(
           _taskToConvert!.id, frequencyHours, _alwaysAssigned);
       await _fetchAllTasks();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text("Aufgabe '${_taskToConvert!.title}' wurde in eine wiederkehrende Aufgabe umgewandelt.")));
-      _convertRecurringPanelController.reverse();
+      _scheduleNotifications(_taskToConvert!, "edited");
     } catch (e) {
       debugPrint("[Dashboard] Fehler bei der Umwandlung in wiederkehrende Aufgabe: $e");
       ScaffoldMessenger.of(context).showSnackBar(
@@ -834,6 +1179,11 @@ class _DashboardScreenState extends State<DashboardScreen>
   Widget _buildTaskDetailPanel(Task task) {
     final isCompleted = task.completed == 1;
     final taskColor = _op(_getTaskColor(task.title), 1.0);
+    String projectName = "";
+    final taskProjectId = _getTaskProjectId(task);
+    if (taskProjectId != null) {
+      projectName = _getProjectName(taskProjectId);
+    }
     return Material(
       elevation: 12,
       borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
@@ -954,6 +1304,40 @@ class _DashboardScreenState extends State<DashboardScreen>
                       ],
                     ),
                   ],
+                  // If no project is assigned, show an "Assign to Project" button.
+                  if (taskProjectId == null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: ElevatedButton(
+                        onPressed: () {
+                          _openAssignProjectPanel(task);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blueAccent,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                        ),
+                        child: const Text("Projekt zuweisen"),
+                      ),
+                    )
+                  else
+                    ...[
+                      const SizedBox(height: 8),
+                      RichText(
+                        text: TextSpan(
+                          children: [
+                            const TextSpan(
+                                text: "Projekt: ",
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black)),
+                            TextSpan(
+                                text: projectName,
+                                style: const TextStyle(color: Colors.black)),
+                          ],
+                        ),
+                      ),
+                    ],
                   const SizedBox(height: 12),
                   Row(
                     children: [
@@ -976,15 +1360,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8)),
                               minimumSize: const Size(0, 24),
-                              textStyle: const TextStyle(
-                                  fontSize: 14, fontWeight: FontWeight.bold),
+                              textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                             ),
                             onPressed: () {
-                              // If task is unassigned, show "Übernehmen" confirmation; otherwise, show finish confirmation.
                               if (task.assignedTo == null || task.assignedTo!.isEmpty) {
-                                _joinTask(task);
+                                _openJoinTaskPanel(task);
                               } else {
-                                _confirmFinishTask(task);
+                                _openFinishTaskPanel(task);
                               }
                             },
                             child: Text(task.assignedTo == null || task.assignedTo!.isEmpty
@@ -1004,293 +1386,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Widget _buildCalendarViewMenu() {
-    return Align(
-      alignment: Alignment.centerRight,
-      child: PopupMenuButton<String>(
-        icon: const Icon(Icons.more_vert),
-        onSelected: (value) {
-          setState(() {
-            _calendarView = value;
-          });
-        },
-        itemBuilder: (context) => [
-          const PopupMenuItem(value: "Woche", child: Text("Woche")),
-          const PopupMenuItem(value: "Zwei Wochen", child: Text("Zwei Wochen")),
-          const PopupMenuItem(value: "Monat", child: Text("Monat")),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCalendar() {
-    switch (_calendarView) {
-      case "Woche":
-        return _buildWeekCalendar();
-      case "Zwei Wochen":
-        return _buildTwoWeekCalendar();
-      case "Monat":
-      default:
-        return _buildMonthlyCalendar();
-    }
-  }
-
-  Widget _buildWeekCalendar() {
-    final now = DateTime.now();
-    final weekday = now.weekday;
-    final monday = now.subtract(Duration(days: weekday - 1));
-    final days = List.generate(7, (i) => monday.add(Duration(days: i)));
-    return Container(
-      margin: EdgeInsets.zero,
-      padding: const EdgeInsets.symmetric(vertical: 0),
-      child: _buildFixedGrid(days),
-    );
-  }
-
-  Widget _buildTwoWeekCalendar() {
-    final now = DateTime.now();
-    final weekday = now.weekday;
-    final monday = now.subtract(Duration(days: weekday - 1));
-    final days = List.generate(14, (i) => monday.add(Duration(days: i)));
-    return Container(
-      margin: EdgeInsets.zero,
-      padding: const EdgeInsets.symmetric(vertical: 0),
-      child: _buildFixedGrid(days),
-    );
-  }
-
-  Widget _buildMonthlyCalendar() {
-    final monthFormat = DateFormat('MMMM yyyy', 'de_DE');
-    final displayMonth = monthFormat.format(_currentMonth);
-    final firstDayOfMonth = DateTime(_currentMonth.year, _currentMonth.month, 1);
-    final daysInMonth = DateTime(_currentMonth.year, _currentMonth.month + 1, 0).day;
-    final firstWeekday = firstDayOfMonth.weekday;
-    final offset = (firstWeekday - 1) % 7;
-    final tiles = <DateTime?>[];
-    for (int i = 0; i < offset; i++) {
-      tiles.add(null);
-    }
-    for (int dayNum = 1; dayNum <= daysInMonth; dayNum++) {
-      tiles.add(DateTime(_currentMonth.year, _currentMonth.month, dayNum));
-    }
-    return Container(
-      margin: EdgeInsets.zero,
-      padding: const EdgeInsets.only(top: 8, bottom: 8),
-      width: double.infinity,
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              IconButton(
-                onPressed: _previousMonth,
-                icon: const Icon(Icons.chevron_left),
-              ),
-              Text(
-                displayMonth,
-                style: const TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.bold),
-              ),
-              Row(
-                children: [
-                  IconButton(
-                    onPressed: _nextMonth,
-                    icon: const Icon(Icons.chevron_right),
-                  ),
-                  _buildCalendarViewMenu(),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 0),
-          _buildWeekdayHeadings(),
-          const SizedBox(height: 0),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final tileWidth = constraints.maxWidth / 7;
-              return Wrap(
-                spacing: 0,
-                runSpacing: 0,
-                children: tiles.map((date) {
-                  return SizedBox(
-                    width: tileWidth,
-                    child: _buildCalendarDay(date),
-                  );
-                }).toList(),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFixedGrid(List<DateTime> days) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final tileWidth = constraints.maxWidth / 7;
-        return Column(
-          children: [
-            _buildWeekdayHeadings(),
-            const SizedBox(height: 0),
-            Wrap(
-              spacing: 0,
-              runSpacing: 0,
-              children: days.map((d) {
-                return SizedBox(
-                  width: tileWidth,
-                  child: _buildCalendarDay(d),
-                );
-              }).toList(),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildWeekdayHeadings() {
-    final weekdaysDe = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-    return Row(
-      children: weekdaysDe
-          .map((w) => Expanded(
-                child: Center(
-                  child: Text(
-                    w,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 16),
-                  ),
-                ),
-              ))
-          .toList(),
-    );
-  }
-
-  Widget _buildCalendarDay(DateTime? date) {
-    if (date == null) {
-      return const SizedBox(height: 80);
-    }
-    final dayNum = date.day;
-    final tasksForThisDay = _tasksForDay(date);
-    return InkWell(
-      onTap: () {
-        // Always show the slideout with task details.
-        setState(() {
-          _selectedTask = tasksForThisDay.firstWhere((t) => t.creationDate != null, orElse: () => tasksForThisDay.first);
-        });
-        _detailPanelController.forward();
-      },
-      child: Container(
-        height: 80,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border.all(color: Colors.grey.shade300),
-        ),
-        padding: const EdgeInsets.all(4),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("$dayNum",
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 16)),
-            const SizedBox(height: 2),
-            Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: tasksForThisDay
-                      .map((t) => Text(
-                            t.title,
-                            style: const TextStyle(
-                                fontSize: 12, color: Colors.black),
-                            overflow: TextOverflow.ellipsis,
-                          ))
-                      .toList(),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showDayTasksDialog(DateTime date, List<Task> tasks) {
-    final dayLabel = DateFormat('EEEE, d.MMMM', 'de_DE').format(date);
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: Text("Aufgaben am $dayLabel",
-              style: const TextStyle(fontWeight: FontWeight.bold)),
-          content: SizedBox(
-            width: 300,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: tasks
-                    .map((t) => ListTile(
-                          title: Text(t.title,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold)),
-                          subtitle: const Text(""),
-                          onTap: () {
-                            Navigator.of(ctx).pop();
-                            setState(() {
-                              _selectedTask = t;
-                            });
-                            _detailPanelController.forward();
-                          },
-                        ))
-                    .toList(),
-              ),
-            ),
-          ),
-          actionsAlignment: MainAxisAlignment.center,
-          actions: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFD62728),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ),
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text("Schliessen",
-                  style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  List<Task> _tasksForDay(DateTime date) {
-    final theDayStart = DateTime(date.year, date.month, date.day);
-    final theDayEnd = theDayStart.add(const Duration(hours: 23, minutes: 59));
-    final tasks = <Task>[];
-    for (var t in allTasks) {
-      if (t.creationDate == null ||
-          t.creationDate!.isEmpty ||
-          t.dueDate == null ||
-          t.dueDate!.isEmpty) {
-        debugPrint(
-            "Skipping task '${t.title}' due to invalid dates: creationDate=${t.creationDate}, dueDate=${t.dueDate}");
-        continue;
-      }
-      try {
-        final c = DateTime.parse(t.creationDate!).toLocal();
-        final d = DateTime.parse(t.dueDate!).toLocal();
-        if (c.isBefore(theDayEnd) && d.isAfter(theDayStart)) {
-          tasks.add(t);
-        }
-      } catch (e) {
-        debugPrint(
-            "Error parsing dates for task '${t.title}': creationDate=${t.creationDate}, dueDate=${t.dueDate} with error: $e");
-      }
-    }
-    return tasks;
-  }
-
+  // ---------------- NEW: Moved _buildTaskCard method before it is used ----------------
   Widget _buildTaskCard(Task task, {bool isCompleted = false, bool hideAssigned = false}) {
     final cardColor = _op(_getTaskColor(task.title), 0.15);
     Widget topBar = Container();
@@ -1301,18 +1397,18 @@ class _DashboardScreenState extends State<DashboardScreen>
         decoration: BoxDecoration(
           color: _getTaskColor(task.title),
           borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+            topLeft: Radius.circular(8),
+            topRight: Radius.circular(8),
+          ),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(task.assignedTo!,
-                style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.bold)),
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             PopupMenuButton<String>(
               padding: EdgeInsets.zero,
-              icon: const Icon(Icons.more_vert,
-                  color: Colors.white, size: 16),
+              icon: const Icon(Icons.more_vert, color: Colors.white, size: 16),
               onSelected: (value) {
                 if (value == "edit") {
                   _showEditTaskPopup(task);
@@ -1342,26 +1438,9 @@ class _DashboardScreenState extends State<DashboardScreen>
           children: [
             const TextSpan(
                 text: "Erstellt am: ",
-                style: TextStyle(
-                    fontWeight: FontWeight.bold, color: Colors.black)),
+                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
             TextSpan(
                 text: Utils.formatDateTime(task.creationDate),
-                style: const TextStyle(color: Colors.black)),
-          ],
-        ),
-      ));
-    }
-    if (isCompleted && task.completedOn != null && task.completedOn!.isNotEmpty) {
-      subtitleWidgets.add(const SizedBox(height: 4));
-      subtitleWidgets.add(RichText(
-        text: TextSpan(
-          children: [
-            const TextSpan(
-                text: "Erledigt am: ",
-                style: TextStyle(
-                    fontWeight: FontWeight.bold, color: Colors.black)),
-            TextSpan(
-                text: Utils.formatDateTime(task.completedOn),
                 style: const TextStyle(color: Colors.black)),
           ],
         ),
@@ -1389,8 +1468,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           Row(
             children: [
               Text(task.title,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, color: Colors.black)),
+                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
               if (task.recurring == true)
                 const Padding(
                   padding: EdgeInsets.only(left: 4),
@@ -1416,15 +1494,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8)),
                       minimumSize: const Size(0, 24),
-                      textStyle: const TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.bold),
+                      textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                     ),
                     onPressed: () {
-                      // If task is unassigned, show "Übernehmen" confirmation; otherwise, show finish confirmation.
                       if (task.assignedTo == null || task.assignedTo!.isEmpty) {
-                        _joinTask(task);
+                        _openJoinTaskPanel(task);
                       } else {
-                        _confirmFinishTask(task);
+                        _openFinishTaskPanel(task);
                       }
                     },
                     child: Text(task.assignedTo == null || task.assignedTo!.isEmpty
@@ -1440,7 +1516,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
     return InkWell(
       onTap: () {
-        // Always show the slideout with task details.
         setState(() {
           _selectedTask = task;
         });
@@ -1449,14 +1524,11 @@ class _DashboardScreenState extends State<DashboardScreen>
       child: Card(
         color: cardColor,
         margin: const EdgeInsets.symmetric(vertical: 6),
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (!hideAssigned &&
-                task.assignedTo != null &&
-                task.assignedTo!.isNotEmpty)
+            if (!hideAssigned && task.assignedTo != null && task.assignedTo!.isNotEmpty)
               topBar,
             taskBody,
           ],
@@ -1465,528 +1537,100 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  Widget _buildOffeneAufgabenListe(List<Task> offene) {
-    return Card(
-      elevation: 4,
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  void _showEditTaskPopup(Task task) {
+    final TextEditingController editController =
+        TextEditingController(text: task.title);
+    // Use the helper method to get the current project id.
+    int? selectedProjectId = _getTaskProjectId(task) ?? (projects.isNotEmpty ? projects[0]['id'] as int : null);
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text("Aufgabe bearbeiten"),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text("Offene Aufgaben",
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                        color: Colors.black,
-                        borderRadius: BorderRadius.circular(4)),
-                    child: Text(offene.length.toString(),
-                        style: const TextStyle(color: Colors.white)),
+                  TextField(
+                    controller: editController,
+                    decoration: const InputDecoration(labelText: "Taskname"),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Text(
+                        "Projekt: ",
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(width: 8),
+                      projects.isNotEmpty
+                          ? DropdownButton<int?>(
+                              value: selectedProjectId,
+                              items: [
+                                const DropdownMenuItem<int?>(
+                                  value: null,
+                                  child: Text("Kein Projekt"),
+                                ),
+                                ...projects.map<DropdownMenuItem<int>>((proj) {
+                                  return DropdownMenuItem<int>(
+                                    value: proj['id'] is int
+                                        ? proj['id'] as int
+                                        : int.tryParse(proj['id'].toString()),
+                                    child: Text(proj['name']),
+                                  );
+                                }).toList(),
+                              ],
+                              onChanged: (newValue) {
+                                setState(() {
+                                  selectedProjectId = newValue;
+                                });
+                              },
+                            )
+                          : const Text("Keine Projekte"),
+                    ],
                   ),
                 ],
               ),
-            ),
-            if (offene.isEmpty)
-              const Text("Keine offenen Aufgaben.")
-            else
-              ...offene.map((task) => _buildTaskCard(task)).toList(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildErledigteAufgaben(List<Task> erledigte) {
-    final filtered = erledigte;
-    return Card(
-      elevation: 4,
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text("Erledigte Aufgaben",
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                      color: Colors.black,
-                      borderRadius: BorderRadius.circular(4)),
-                  child: Text(filtered.length.toString(),
-                      style: const TextStyle(color: Colors.white)),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text("Abbrechen"),
                 ),
-                DropdownButton<String>(
-                  value: _selectedCompletedRange,
-                  items: _statRanges
-                      .map((s) =>
-                          DropdownMenuItem<String>(value: s, child: Text(s)))
-                      .toList(),
-                  onChanged: (val) {
-                    setState(() {
-                      _selectedCompletedRange = val ?? "Letzte 7 Tage";
-                    });
+                TextButton(
+                  onPressed: () async {
+                    final newTitle = editController.text.trim();
+                    if (newTitle.isNotEmpty) {
+                      try {
+                        debugPrint(
+                            "[Dashboard] Editing task id=${task.id} newTitle=$newTitle, newProjectId=$selectedProjectId");
+                        await ApiService.editTask(task.id, newTitle,
+                            projectId: selectedProjectId);
+                        await _fetchAllTasks();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                              content:
+                                  Text("Aufgabe aktualisiert: $newTitle")),
+                        );
+                      } catch (e) {
+                        debugPrint(
+                            "[Dashboard] Fehler beim Bearbeiten der Aufgabe: $e");
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text("Fehler beim Bearbeiten der Aufgabe.")),
+                        );
+                      }
+                    }
+                    Navigator.of(ctx).pop();
                   },
+                  child: const Text("Speichern"),
                 ),
               ],
-            ),
-            const SizedBox(height: 10),
-            if (filtered.isEmpty)
-              const Text("Keine erledigten Aufgaben.")
-            else
-              ...filtered
-                  .map((task) =>
-                      _buildTaskCard(task, isCompleted: true))
-                  .toList(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAssignedToYouSection(List<Task> tasks, int count) {
-    return Card(
-      elevation: 4,
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text("Meine offene Aufgaben",
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                        color: Colors.black,
-                        borderRadius: BorderRadius.circular(4)),
-                    child: Text(count.toString(),
-                        style: const TextStyle(color: Colors.white)),
-                  ),
-                ],
-              ),
-            ),
-            if (tasks.isEmpty)
-              const Text("Keine dir zugewiesenen Aufgaben.")
-            else
-              ...tasks
-                  .map((task) => _buildTaskCard(task, hideAssigned: true))
-                  .toList(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProjectsSection() {
-    return Card(
-      elevation: 4,
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("Projekte",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            if (projects.isEmpty)
-              const Text("Keine Projekte gefunden.")
-            else
-              ...projects
-                  .map((project) => _buildProjectCard(project))
-                  .toList(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProjectCard(Map<String, dynamic> project) {
-    List<dynamic> todos = project["todos"] ?? [];
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 0),
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      child: ExpansionTile(
-        title: Text(
-          project["name"],
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-        ),
-        subtitle: Text(project["description"] ?? ""),
-        children: [
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: todos.length,
-            itemBuilder: (context, index) {
-              final todo = todos[index];
-              final bool isTask = (todo["is_task"] == 1);
-              return Card(
-                color: isTask ? Colors.green[50] : Colors.orange[50],
-                margin: const EdgeInsets.symmetric(
-                    vertical: 4, horizontal: 8),
-                child: ListTile(
-                  title: Text(todo["title"]),
-                  subtitle: Text(todo["description"] ?? ""),
-                  trailing: isTask
-                      ? (todo["assigned_to"] != null
-                          ? Chip(
-                              label: Text(todo["assigned_to"]),
-                              backgroundColor: Colors.blue[100],
-                            )
-                          : null)
-                      : ElevatedButton(
-                          onPressed: () {
-                            _showConvertTodoDialog(
-                                project["id"], todo["id"]);
-                          },
-                          child: const Text("Umwandeln"),
-                        ),
-                  onTap: () {
-                    debugPrint(
-                        "[Dashboard] Todo/Aufgabe angeklickt: ${todo["title"]}");
-                    showDialog(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: Text(todo["title"]),
-                        content: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text("Beschreibung: ${todo["description"] ?? "Keine"}"),
-                            Text("Erstellt am: ${todo["creation_date"]}"),
-                            if (todo["due_date"] != null)
-                              Text("Fällig bis: ${todo["due_date"]}"),
-                            if (isTask && todo["assigned_to"] != null)
-                              Text("Zugewiesen an: ${todo["assigned_to"]}"),
-                            if (isTask) Text("Punkte: ${todo["points"]}"),
-                          ],
-                        ),
-                        actionsAlignment: MainAxisAlignment.center,
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.of(context).pop(),
-                            child: const Text("Schliessen"),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              );
-            },
-          ),
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: ElevatedButton.icon(
-              onPressed: () {
-                _showCreateTodoDialog(project["id"]);
-              },
-              icon: const Icon(Icons.add),
-              label: const Text("Neuen Todo hinzufügen"),
-            ),
-          )
-        ],
-      ),
-    );
-  }
-
-  void _showCreateTodoDialog(int projectId) {
-    TextEditingController titleController = TextEditingController();
-    TextEditingController descController = TextEditingController();
-    TextEditingController dueController = TextEditingController();
-    TextEditingController pointsController =
-        TextEditingController(text: "0");
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Neuen Todo hinzufügen"),
-        content: SingleChildScrollView(
-          child: Column(
-            children: [
-              TextField(
-                controller: titleController,
-                decoration:
-                    const InputDecoration(labelText: "Todo Titel"),
-              ),
-              TextField(
-                controller: descController,
-                decoration:
-                    const InputDecoration(labelText: "Beschreibung"),
-              ),
-              TextField(
-                controller: dueController,
-                decoration: const InputDecoration(
-                    labelText: "Fälligkeitsdatum (ISO)"),
-              ),
-              TextField(
-                controller: pointsController,
-                decoration:
-                    const InputDecoration(labelText: "Punkte"),
-                keyboardType: TextInputType.number,
-              ),
-            ],
-          ),
-        ),
-        actionsAlignment: MainAxisAlignment.center,
-        actions: [
-          TextButton(
-            onPressed: () {
-              debugPrint("[Dashboard] Todo-Erstellung abgebrochen");
-              Navigator.of(context).pop();
-            },
-            child: const Text("Abbrechen"),
-          ),
-          TextButton(
-            onPressed: () async {
-              final title = titleController.text.trim();
-              final description = descController.text.trim();
-              final dueDate = dueController.text.trim();
-              final points =
-                  int.tryParse(pointsController.text.trim()) ?? 0;
-              if (title.isEmpty) {
-                debugPrint("[Dashboard] Todo Titel leer");
-                return;
-              }
-              try {
-                final todo = await ApiService.createProjectTodo(
-                    projectId,
-                    title,
-                    description,
-                    dueDate.isEmpty ? null : dueDate,
-                    points,
-                    _selectedGroupId
-                    );
-                debugPrint("[Dashboard] Todo erstellt: ${todo}");
-                Navigator.of(context).pop();
-                _fetchProjects();
-              } catch (e) {
-                debugPrint("[Dashboard] Fehler bei der Todo-Erstellung: $e");
-              }
-            },
-            child: const Text("Erstellen"),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showConvertTodoDialog(int projectId, int todoId) async {
-    TextEditingController durationController = TextEditingController(text: "48");
-    TextEditingController pointsController = TextEditingController(text: "0");
-    List<String> allowedUsers = [];
-    try {
-      allowedUsers = await ApiService.getProjectAssignments(projectId);
-    } catch (e) {
-      debugPrint("[Dashboard] Error fetching project assignments: $e");
-    }
-    if (allowedUsers.isEmpty && _groupMembers.isNotEmpty) {
-      allowedUsers = _groupMembers.map((member) => member['username'] as String).toList();
-    }
-    if (allowedUsers.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Keine Berechtigten gefunden für dieses Projekt")),
-      );
-      return;
-    }
-    String selectedAssignment = allowedUsers.first;
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) {
-          return AlertDialog(
-            title: const Text("Todo in Aufgabe umwandeln"),
-            content: SingleChildScrollView(
-              child: Column(
-                children: [
-                  DropdownButton<String>(
-                    value: selectedAssignment,
-                    dropdownColor: Colors.white,
-                    style: const TextStyle(color: Colors.black),
-                    items: allowedUsers
-                        .map((username) => DropdownMenuItem(
-                              value: username,
-                              child: Text(username),
-                            ))
-                        .toList(),
-                    onChanged: (newVal) {
-                      setState(() {
-                        selectedAssignment = newVal!;
-                      });
-                    },
-                  ),
-                  TextField(
-                    controller: durationController,
-                    decoration: const InputDecoration(labelText: "Dauer in Stunden"),
-                    keyboardType: TextInputType.number,
-                  ),
-                  TextField(
-                    controller: pointsController,
-                    decoration: const InputDecoration(labelText: "Punkte"),
-                    keyboardType: TextInputType.number,
-                  ),
-                ],
-              ),
-            ),
-            actionsAlignment: MainAxisAlignment.center,
-            actions: [
-              TextButton(
-                onPressed: () {
-                  debugPrint("[Dashboard] Todo conversion cancelled");
-                  Navigator.of(context).pop();
-                },
-                child: const Text("Abbrechen"),
-              ),
-              TextButton(
-                onPressed: () async {
-                  final duration = int.tryParse(durationController.text.trim()) ?? 48;
-                  final points = int.tryParse(pointsController.text.trim()) ?? 0;
-                  if (selectedAssignment.isEmpty) {
-                    debugPrint("[Dashboard] Kein Benutzer zugewiesen");
-                    return;
-                  }
-                  try {
-                    final converted = await ApiService.convertProjectTodo(
-                        projectId, todoId, selectedAssignment, duration, points);
-                    debugPrint("[Dashboard] Todo umgewandelt: $converted");
-                    Navigator.of(context).pop();
-                    _fetchProjects();
-                  } catch (e) {
-                    debugPrint("[Dashboard] Fehler bei der Umwandlung: $e");
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("Fehler bei der Umwandlung.")),
-                    );
-                  }
-                },
-                child: const Text("Umwandeln"),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  void _previousMonth() {
-    setState(() {
-      _currentMonth = DateTime(_currentMonth.year, _currentMonth.month - 1);
-    });
-  }
-
-  void _nextMonth() {
-    setState(() {
-      _currentMonth = DateTime(_currentMonth.year, _currentMonth.month + 1);
-    });
-  }
-
-  Color _op(Color base, double fraction) {
-    final alpha = (fraction * 255).round().clamp(0, 255);
-    return base.withAlpha(alpha);
-  }
-
-  Color _getTaskColor(String title) {
-    final lower = title.toLowerCase();
-    if (lower.contains("wäsche")) return const Color(0xFF653993);
-    if (lower.contains("küche")) return const Color(0xFF431307);
-    if (lower.contains("kochen")) return const Color(0xFF9B1C31);
-    return Colors.grey;
-  }
-
-  void _confirmFinishTask(Task task) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Aufgabe abschließen"),
-        content: Text("Möchtest du die Aufgabe '${task.title}' als erledigt markieren?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text("Abbrechen"),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.of(ctx).pop();
-              _finishTask(task);
-            },
-            child: const Text("Bestätigen"),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _finishTask(Task task) async {
-    try {
-      debugPrint("[Dashboard] Finishing task id=${task.id} by user ${widget.currentUser}");
-      final updatedTask = await ApiService.finishTask(task.id, widget.currentUser);
-      debugPrint("[Dashboard] Task finished and archived: ${updatedTask.toJson()}");
-      await _fetchAllTasks();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Aufgabe '${task.title}' wurde als erledigt markiert und archiviert.")),
-      );
-      _scheduleNotifications(updatedTask, "completed");
-    } catch (e) {
-      debugPrint("[Dashboard] Fehler beim Abschließen der Aufgabe: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Fehler beim Abschließen der Aufgabe.")),
-      );
-    }
-  }
-
-  void _showEditTaskPopup(Task task) {
-    final TextEditingController editController = TextEditingController(text: task.title);
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Aufgabe bearbeiten"),
-        content: TextField(
-          controller: editController,
-          decoration: const InputDecoration(labelText: "Taskname"),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text("Abbrechen"),
-          ),
-          TextButton(
-            onPressed: () async {
-              final newTitle = editController.text.trim();
-              if (newTitle.isNotEmpty) {
-                try {
-                  debugPrint("[Dashboard] Editing task id=${task.id} newTitle=$newTitle");
-                  final updatedTask = await ApiService.editTask(task.id, newTitle);
-                  await _fetchAllTasks();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("Aufgabe aktualisiert: $newTitle")),
-                  );
-                } catch (e) {
-                  debugPrint("[Dashboard] Fehler beim Bearbeiten der Aufgabe: $e");
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Fehler beim Bearbeiten der Aufgabe.")),
-                  );
-                }
-              }
-              Navigator.of(ctx).pop();
-            },
-            child: const Text("Speichern"),
-          ),
-        ],
-      ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -2038,11 +1682,87 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  // ---------------- Build methods for assigned and open tasks sections ----------------
+  Widget _buildAssignedToYouSection(List<Task> tasks, int count) {
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("Meine offene Aufgaben",
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                        color: Colors.black,
+                        borderRadius: BorderRadius.circular(4)),
+                    child: Text(count.toString(),
+                        style: const TextStyle(color: Colors.white)),
+                  ),
+                ],
+              ),
+            ),
+            if (tasks.isEmpty)
+              const Text("Keine dir zugewiesenen Aufgaben.")
+            else
+              ...tasks
+                  .map((task) => _buildTaskCard(task, hideAssigned: true))
+                  .toList(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOffeneAufgabenListe(List<Task> offene) {
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("Offene Aufgaben",
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                        color: Colors.black,
+                        borderRadius: BorderRadius.circular(4)),
+                    child: Text(offene.length.toString(),
+                        style: const TextStyle(color: Colors.white)),
+                  ),
+                ],
+              ),
+            ),
+            if (offene.isEmpty)
+              const Text("Keine offenen Aufgaben.")
+            else
+              ...offene.map((task) => _buildTaskCard(task)).toList(),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    debugPrint("Dashboard build: currentUser='${widget.currentUser}', tasks=${allTasks.length}, projects=${projects.length}");
+    debugPrint("Dashboard build: currentUser='${widget.currentUser}', tasks=${allTasks.length}");
     final offeneAufgaben = allTasks.where((t) => t.completed == 0).toList();
-    final completedTasks = allTasks.where((t) => t.completed == 1).toList();
     final userAssignedOpenTasks = allTasks.where((t) {
       if (t.completed == 1) return false;
       if (t.assignedTo == null) return false;
@@ -2061,10 +1781,12 @@ class _DashboardScreenState extends State<DashboardScreen>
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => GroupManagementScreen(currentUser: widget.currentUser),
+                  builder: (context) =>
+                      GroupManagementScreen(currentUser: widget.currentUser),
                 ),
               ).then((_) async {
-                debugPrint("[Dashboard] Returned from GroupManagementScreen. Refreshing groups...");
+                debugPrint(
+                    "[Dashboard] Returned from GroupManagementScreen. Refreshing groups...");
                 await _fetchUserGroups();
                 await _fetchAllTasks();
                 await _fetchProjects();
@@ -2175,17 +1897,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                 _buildAssignedToYouSection(userAssignedOpenTasks, assignedCount),
                 const SizedBox(height: 16),
                 _buildOffeneAufgabenListe(offeneAufgaben),
-                const SizedBox(height: 16),
-                _buildCalendarViewMenu(),
-                const SizedBox(height: 16),
-                Container(
-                  width: MediaQuery.of(context).size.width,
-                  child: _buildCalendar(),
-                ),
-                const SizedBox(height: 16),
-                _buildErledigteAufgaben(completedTasks),
-                const SizedBox(height: 16),
-                _buildProjectsSection(),
               ],
             ),
           ),
@@ -2219,9 +1930,42 @@ class _DashboardScreenState extends State<DashboardScreen>
                 child: _buildConvertRecurringPanel(),
               ),
             ),
+          if (_showFinishTaskPanel)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SlideTransition(
+                position: _finishTaskPanelSlideAnimation,
+                child: _buildFinishTaskPanel(),
+              ),
+            ),
+          if (_showJoinTaskPanel)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SlideTransition(
+                position: _joinTaskPanelSlideAnimation,
+                child: _buildJoinTaskPanel(),
+              ),
+            ),
         ],
       ),
     );
+  }
+
+  Color _op(Color base, double fraction) {
+    final alpha = (fraction * 255).round().clamp(0, 255);
+    return base.withAlpha(alpha);
+  }
+
+  Color _getTaskColor(String title) {
+    final lower = title.toLowerCase();
+    if (lower.contains("wäsche")) return const Color(0xFF653993);
+    if (lower.contains("küche")) return const Color(0xFF431307);
+    if (lower.contains("kochen")) return const Color(0xFF9B1C31);
+    return Colors.grey;
   }
 }
 
@@ -2248,7 +1992,6 @@ class CountdownProgressBar extends StatefulWidget {
 
 class _CountdownProgressBarState extends State<CountdownProgressBar> {
   late Timer _timer;
-  Duration _durationDiff = Duration.zero;
 
   @override
   void initState() {
@@ -2261,11 +2004,7 @@ class _CountdownProgressBarState extends State<CountdownProgressBar> {
 
   void _updateDuration() {
     setState(() {
-      if (widget.isCompleted && widget.completedOn != null) {
-        _durationDiff = widget.completedOn!.difference(widget.end);
-      } else {
-        _durationDiff = widget.end.difference(DateTime.now());
-      }
+      // The widget rebuilds every second. No need to store a duration difference.
     });
   }
 

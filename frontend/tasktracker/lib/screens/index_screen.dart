@@ -1,7 +1,6 @@
 // lib/screens/index_screen.dart, do not remove this line!
 
 import 'package:flutter/material.dart';
-import 'package:flutter_tasktracker/api_service.dart';
 import 'package:flutter_tasktracker/screens/dashboard_screen.dart';
 
 class IndexScreen extends StatefulWidget {
@@ -86,11 +85,6 @@ class _IndexScreenState extends State<IndexScreen> {
           ),
         ),
       );
-    } else {
-      debugPrint("[IndexScreen] Login failure. Setting error message.");
-      setState(() {
-        _errorMessage = "Invalid credentials";
-      });
-    }
+    } 
   }
 }

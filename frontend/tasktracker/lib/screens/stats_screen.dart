@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_tasktracker/api_service.dart';
 import 'package:flutter_tasktracker/models/stats_response.dart';
-import 'package:flutter_tasktracker/utils.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:flutter_tasktracker/screens/dashboard_screen.dart';
-import 'package:flutter_tasktracker/screens/personal_stats_screen.dart';
 import 'package:flutter_tasktracker/widgets/custom_bottom_bar.dart';
 
 // Data classes for intermediate chart logic

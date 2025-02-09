@@ -455,12 +455,18 @@ class ApiService {
     debugPrint("[ApiService] register_token response code: ${response.statusCode}");
   }
 
-  static Future<Task> editTask(int id, String newTitle) async {
-    debugPrint("[ApiService] PUT /api/tasks/$id => newTitle=$newTitle");
+  static Future<Task> editTask(int id, String newTitle, {int? projectId}) async {
+    debugPrint("[ApiService] PUT /api/tasks/$id => newTitle=$newTitle, projectId=$projectId");
+    // Build the JSON payload with the new title.
+    final Map<String, dynamic> payload = {"title": newTitle};
+    // If a projectId is provided, add it to the payload.
+    if (projectId != null) {
+      payload["project_id"] = projectId;
+    }
     final response = await http.put(
       Uri.parse("$baseUrl/api/tasks/$id"),
       headers: {"Content-Type": "application/json"},
-      body: json.encode({"title": newTitle}),
+      body: json.encode(payload),
     );
     if (response.statusCode == 200) {
       final jsonData = json.decode(response.body);
@@ -511,7 +517,6 @@ class ApiService {
   }
 
   // --- New Methods for History / Archiving ---
-
   /// Fetch archived tasks (history) for a given group.
   static Future<List<Task>> getTaskHistory(String groupId) async {
     debugPrint("[ApiService] GET /api/history?group_id=$groupId ...");

@@ -1,4 +1,4 @@
-// test\widget_test.dart, do not remove this line!
+// test/widget_test.dart, do not remove this line!
 //
 // This is a basic Flutter widget test.
 //
@@ -18,7 +18,7 @@ void main() {
   testWidgets('Counter increments smoke test', (WidgetTester tester) async {
     // Build our app and trigger a frame.
     // Make sure the main.dart defines a widget named `MyTaskTrackerApp`.
-    await tester.pumpWidget(const MyTaskTrackerApp());
+    await tester.pumpWidget(const MyTaskTrackerApp(initialUser: 'testUser'));
 
     // Verify that our counter starts at 0 (if you have a counter in your app).
     expect(find.text('0'), findsOneWidget);

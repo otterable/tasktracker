@@ -695,6 +695,13 @@ def api_create_recurring_task():
             log("[api_create_recurring_task] duration_hours and frequency_hours must be integers")
             return jsonify({"error": "duration_hours and frequency_hours must be integers"}), 400
 
+        # Convert project_id to int if provided (or set to None if conversion fails)
+        if project_id is not None:
+            try:
+                project_id = int(project_id)
+            except ValueError:
+                project_id = None
+
         creation_date = datetime.utcnow().isoformat()
         due_date = (datetime.utcnow() + timedelta(hours=duration_hours)).isoformat()
         log(f"[api_create_recurring_task] Creating recurring task with title='{title}', creation_date='{creation_date}', due_date='{due_date}', frequency_hours={frequency_hours}, always_assigned={always_assigned}")
@@ -780,6 +787,13 @@ def api_create_task():
             log("[api_create_task] duration_hours must be an integer")
             return jsonify({"error": "duration_hours must be an integer"}), 400
 
+        # Convert project_id to int if provided (or set to None if conversion fails)
+        if project_id is not None:
+            try:
+                project_id = int(project_id)
+            except ValueError:
+                project_id = None
+
         creation_date = datetime.utcnow().isoformat()
         due_date = (datetime.utcnow() + timedelta(hours=duration_hours)).isoformat()
         log(f"[api_create_task] Creating task with title='{title}', creation_date='{creation_date}', due_date='{due_date}', recurring='{recurring}'")
@@ -825,6 +839,45 @@ def api_create_task():
 
     except Exception as e:
         log(f"[api_create_task] Exception occurred: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+# NEW: Endpoint to update an existing task (including assigning it to a project)
+@app.route('/api/tasks/<int:task_id>', methods=['PUT'])
+def api_edit_task(task_id):
+    try:
+        data = request.get_json() or {}
+        title = data.get("title", "").strip()
+        project_id = data.get("project_id")  # may be None
+        if not title:
+            return jsonify({"error": "Title is required"}), 400
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE tasks SET title=?, project_id=? WHERE id=?", (title, project_id, task_id))
+        conn.commit()
+        cursor.execute("SELECT * FROM tasks WHERE id=?", (task_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row is None:
+            return jsonify({"error": "Task not found"}), 404
+        task = {
+            "id": row["id"],
+            "title": row["title"],
+            "assigned_to": row["assigned_to"],
+            "creation_date": row["creation_date"],
+            "due_date": row["due_date"],
+            "completed": row["completed"],
+            "completed_by": row["completed_by"],
+            "completed_on": row["completed_on"],
+            "recurring": bool(row["recurring"]),
+            "frequency_hours": row["frequency_hours"],
+            "always_assigned": bool(row["always_assigned"]),
+            "group_id": row["group_id"],
+            "project_id": row["project_id"]
+        }
+        log(f"[api_edit_task] Updated task {task_id} with title: {title} and project_id: {project_id}")
+        return jsonify(task), 200
+    except Exception as e:
+        log(f"[api_edit_task] Exception occurred: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
 # --- NEW JOIN TASK ENDPOINT ---
@@ -954,7 +1007,7 @@ def api_get_projects():
     conn = get_db_connection()
     cursor = conn.cursor()
     group_id = request.args.get("group_id")
-    if group_id:
+    if (group_id):
         cursor.execute("SELECT * FROM projects WHERE group_id=?", (group_id,))
     else:
         cursor.execute("SELECT * FROM projects")
@@ -1005,7 +1058,7 @@ def api_create_project():
     description = data.get("description", "")
     created_by = data.get("created_by", "Unknown")
     creation_date = datetime.utcnow().isoformat()
-    log(f"[api/create_project] Creating project: name={name}, created_by={created_by}, group_id={data.get('group_id', 'default')}")
+    log(f"[api/create_project] Creating project: name={name}, createdBy={created_by}, group_id={data.get('group_id', 'default')}")
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
