@@ -3,12 +3,12 @@ import 'package:flutter_tasktracker/screens/dashboard_screen.dart';
 import 'package:flutter_tasktracker/screens/stats_screen.dart';
 import 'package:flutter_tasktracker/screens/personal_stats_screen.dart';
 import 'package:flutter_tasktracker/screens/my_account_screen.dart';
-import 'package:flutter_tasktracker/screens/projects_screen.dart'; // Import the projects screen
+import 'package:flutter_tasktracker/screens/projects_screen.dart'; // <-- We do use ProjectsScreen here
 
 class CustomBottomBar extends StatelessWidget {
-  final int selectedIndex; // currently unused; you may remove if not needed
+  final int selectedIndex; 
   final String currentUser;
-  final String currentGroupId; // NEW: Pass the currently selected group ID
+  final String currentGroupId;
   final VoidCallback onLogout;
 
   const CustomBottomBar({
@@ -19,11 +19,11 @@ class CustomBottomBar extends StatelessWidget {
     required this.onLogout,
   }) : super(key: key);
 
-  /// The Tasks button shows a popup menu to select one of the task-related screens.
+  /// Builds the “Tasks” popup menu: Dashboard, Stats, Personal Stats
   Widget _buildTasksButton(BuildContext context) {
     return PopupMenuButton<int>(
       tooltip: "Tasks",
-      padding: EdgeInsets.zero, // set padding to zero to avoid overflow
+      padding: EdgeInsets.zero,
       icon: Column(
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -42,6 +42,7 @@ class CustomBottomBar extends StatelessWidget {
       ),
       onSelected: (int value) {
         if (value == 0) {
+          // Dashboard
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
@@ -52,23 +53,25 @@ class CustomBottomBar extends StatelessWidget {
             ),
           );
         } else if (value == 1) {
+          // Stats
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
               builder: (_) => StatsScreen(
                 currentUser: currentUser,
-                currentGroupId: currentGroupId, // NEW
+                currentGroupId: currentGroupId,
                 onLogout: onLogout,
               ),
             ),
           );
         } else if (value == 2) {
+          // Personal Stats
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
               builder: (_) => PersonalStatsScreen(
                 username: currentUser,
-                currentGroupId: currentGroupId, // NEW
+                currentGroupId: currentGroupId,
                 onLogout: onLogout,
               ),
             ),
@@ -110,7 +113,7 @@ class CustomBottomBar extends StatelessWidget {
     );
   }
 
-  /// Generic bottom bar item builder for unused pages.
+  /// Reusable bottom-bar item
   Widget _buildBottomBarItem({
     required BuildContext context,
     required IconData icon,
@@ -145,6 +148,7 @@ class CustomBottomBar extends StatelessWidget {
       child: Row(
         children: [
           Expanded(child: _buildTasksButton(context)),
+          // ----- Projects -----
           Expanded(
             child: _buildBottomBarItem(
               context: context,
@@ -164,6 +168,7 @@ class CustomBottomBar extends StatelessWidget {
               },
             ),
           ),
+          // ----- SOPs -----
           Expanded(
             child: _buildBottomBarItem(
               context: context,
@@ -176,6 +181,7 @@ class CustomBottomBar extends StatelessWidget {
               },
             ),
           ),
+          // ----- Notes -----
           Expanded(
             child: _buildBottomBarItem(
               context: context,
@@ -188,6 +194,7 @@ class CustomBottomBar extends StatelessWidget {
               },
             ),
           ),
+          // ----- Account -----
           Expanded(
             child: _buildBottomBarItem(
               context: context,

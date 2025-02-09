@@ -12,6 +12,7 @@ class Task {
   final bool recurring;
   final int? frequencyHours;
   final bool alwaysAssigned;
+  final int? projectId; // <-- NEW FIELD
 
   Task({
     required this.id,
@@ -25,6 +26,7 @@ class Task {
     required this.recurring,
     this.frequencyHours,
     required this.alwaysAssigned,
+    this.projectId, // <-- Add to constructor
   });
 
   factory Task.fromJson(Map<String, dynamic> json) {
@@ -40,6 +42,7 @@ class Task {
       recurring: json["recurring"] == 1 || json["recurring"] == true,
       frequencyHours: json["frequency_hours"],
       alwaysAssigned: json["always_assigned"] == 1 || json["always_assigned"] == true,
+      projectId: json["project_id"], // <-- Parse project_id
     );
   }
 
@@ -57,6 +60,7 @@ class Task {
       "recurring": recurring ? 1 : 0,
       "frequency_hours": frequencyHours,
       "always_assigned": alwaysAssigned ? 1 : 0,
+      "project_id": projectId, // <-- Include projectId in JSON
     };
   }
 }

@@ -457,9 +457,7 @@ class ApiService {
 
   static Future<Task> editTask(int id, String newTitle, {int? projectId}) async {
     debugPrint("[ApiService] PUT /api/tasks/$id => newTitle=$newTitle, projectId=$projectId");
-    // Build the JSON payload with the new title.
     final Map<String, dynamic> payload = {"title": newTitle};
-    // If a projectId is provided, add it to the payload.
     if (projectId != null) {
       payload["project_id"] = projectId;
     }
@@ -517,7 +515,6 @@ class ApiService {
   }
 
   // --- New Methods for History / Archiving ---
-  /// Fetch archived tasks (history) for a given group.
   static Future<List<Task>> getTaskHistory(String groupId) async {
     debugPrint("[ApiService] GET /api/history?group_id=$groupId ...");
     final response = await http.get(Uri.parse("$baseUrl/api/history?group_id=$groupId"));
@@ -530,9 +527,6 @@ class ApiService {
     }
   }
 
-  /// URL to export archived tasks as CSV.
   static String getHistoryCsvExportUrl() => "$baseUrl/export_history_csv";
-
-  /// URL to export archived tasks as XLSX.
   static String getHistoryXlsxExportUrl() => "$baseUrl/export_history_xlsx";
 }

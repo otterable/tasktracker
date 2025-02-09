@@ -1,397 +1,422 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_tasktracker/api_service.dart';
+import 'package:flutter_tasktracker/models/task.dart';
 import 'package:flutter_tasktracker/widgets/custom_bottom_bar.dart';
+import 'package:flutter_tasktracker/utils.dart';
 
-class ProjectsScreen extends StatefulWidget {
+class ProjectTasksScreen extends StatefulWidget {
   final String currentUser;
   final String groupId;
+  final Map<String, dynamic> project;
   final VoidCallback onLogout;
 
-  const ProjectsScreen({
+  const ProjectTasksScreen({
     Key? key,
     required this.currentUser,
     required this.groupId,
+    required this.project,
     required this.onLogout,
   }) : super(key: key);
 
   @override
-  _ProjectsScreenState createState() => _ProjectsScreenState();
+  _ProjectTasksScreenState createState() => _ProjectTasksScreenState();
 }
 
-class _ProjectsScreenState extends State<ProjectsScreen>
+class _ProjectTasksScreenState extends State<ProjectTasksScreen>
     with SingleTickerProviderStateMixin {
-  List<dynamic> projects = [];
-  List<dynamic> _userGroups = [];
-  String? _selectedGroupId;
+  List<Task> _projectTasks = [];
   bool _isLoading = false;
 
-  // Controllers for project creation slide-out panel
-  bool _showCreateProjectPanel = false;
-  late AnimationController _createProjectPanelController;
-  late Animation<Offset> _createProjectPanelSlideAnimation;
+  // Slide-out detail panel
+  Task? _selectedTask;
+  late AnimationController _detailPanelController;
+  late Animation<Offset> _detailPanelSlideAnimation;
 
-  final TextEditingController _projectNameController = TextEditingController();
-  final TextEditingController _projectDescriptionController =
-      TextEditingController();
+  // Slide-out finishing panel
+  bool _showFinishTaskPanel = false;
+  Task? _taskToFinish;
+  late AnimationController _finishTaskPanelController;
+  late Animation<Offset> _finishTaskPanelSlideAnimation;
+
+  // Slide-out joining panel
+  bool _showJoinTaskPanel = false;
+  Task? _taskToJoin;
+  late AnimationController _joinTaskPanelController;
+  late Animation<Offset> _joinTaskPanelSlideAnimation;
 
   @override
   void initState() {
     super.initState();
-    _selectedGroupId = widget.groupId;
-    _fetchUserGroups().then((_) {
-      _fetchProjects();
-    });
-    _createProjectPanelController = AnimationController(
+    _fetchProjectTasks();
+
+    // Detail panel controller
+    _detailPanelController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
-    _createProjectPanelSlideAnimation = Tween<Offset>(
+    _detailPanelSlideAnimation = Tween<Offset>(
       begin: const Offset(0, 1),
-      end: Offset.zero,
-    ).animate(
-      CurvedAnimation(
-        parent: _createProjectPanelController,
-        curve: Curves.easeInOut,
-      ),
+      end: const Offset(0, 0),
+    ).animate(_detailPanelController);
+
+    // Finish task panel
+    _finishTaskPanelController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
     );
+    _finishTaskPanelSlideAnimation = Tween<Offset>(
+      begin: const Offset(0, 1),
+      end: const Offset(0, 0),
+    ).animate(_finishTaskPanelController);
+
+    // Join task panel
+    _joinTaskPanelController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _joinTaskPanelSlideAnimation = Tween<Offset>(
+      begin: const Offset(0, 1),
+      end: const Offset(0, 0),
+    ).animate(_joinTaskPanelController);
   }
 
   @override
   void dispose() {
-    _createProjectPanelController.dispose();
-    _projectNameController.dispose();
-    _projectDescriptionController.dispose();
+    _detailPanelController.dispose();
+    _finishTaskPanelController.dispose();
+    _joinTaskPanelController.dispose();
     super.dispose();
   }
 
-  Future<void> _fetchUserGroups() async {
+  Future<void> _fetchProjectTasks() async {
+    setState(() => _isLoading = true);
     try {
-      debugPrint("[ProjectsScreen] Fetching user groups for ${widget.currentUser}");
-      final groups = await ApiService.getUserGroups(widget.currentUser);
+      // 1) Load all tasks for the group
+      final allGroupTasks = await ApiService.getAllTasks(widget.groupId);
+
+      // 2) Filter tasks for projectId == widget.project['id']
+      final projectId = widget.project['id'] is int
+          ? widget.project['id'] as int
+          : int.tryParse(widget.project['id'].toString());
+
+      final tasksForThisProject = allGroupTasks.where((t) {
+        return t.projectId == projectId;
+      }).toList();
+
       setState(() {
-        _userGroups = groups;
-        if (groups.isNotEmpty) {
-          _selectedGroupId ??= groups[0]['id'].toString();
-        }
+        _projectTasks = tasksForThisProject;
       });
-      debugPrint("[ProjectsScreen] Fetched ${_userGroups.length} user groups.");
     } catch (e) {
-      debugPrint("Error fetching user groups: $e");
+      debugPrint("[ProjectTasksScreen] Error fetching tasks: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Fehler beim Laden der Projektaufgaben.")),
+      );
+    } finally {
+      setState(() => _isLoading = false);
     }
   }
 
-Future<void> _fetchProjects() async {
-  setState(() {
-    _isLoading = true;
-  });
-  try {
-    debugPrint("[ProjectsScreen] Fetching projects for group $_selectedGroupId");
-    final allProjects = await ApiService.getProjects(_selectedGroupId!);
-    // Also fetch all tasks for the group
-    final allTasks = await ApiService.getAllTasks(_selectedGroupId!);
-    // For each project, compute open and finished tasks counts
-    final updatedProjects = allProjects.map((proj) {
-      final projId = proj['id'] is int
-          ? proj['id'] as int
-          : int.tryParse(proj['id'].toString());
-      int openCount = 0;
-      int finishedCount = 0;
-      for (var task in allTasks) {
-        // Convert task's project_id to int for safe comparison
-        final taskProjId = task.toJson()['project_id'] != null
-            ? int.tryParse(task.toJson()['project_id'].toString())
-            : null;
-        if (taskProjId != null && taskProjId == projId) {
-          if (task.completed == 0)
-            openCount++;
-          else
-            finishedCount++;
-        }
-      }
-      proj['open_tasks_count'] = openCount;
-      proj['finished_tasks_count'] = finishedCount;
-      return proj;
-    }).toList();
-    debugPrint("[ProjectsScreen] After processing, ${updatedProjects.length} projects remain.");
+  // ===================== FINISH TASK =====================
+  void _openFinishTaskPanel(Task task) {
     setState(() {
-      projects = updatedProjects;
+      _taskToFinish = task;
+      _showFinishTaskPanel = true;
     });
-  } catch (e) {
-    debugPrint("Error fetching projects: $e");
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Fehler beim Laden der Projekte.")),
-    );
-  } finally {
-    setState(() {
-      _isLoading = false;
-    });
-  }
-}
-
-
-  void _openCreateProjectPanel() {
-    setState(() {
-      _showCreateProjectPanel = true;
-    });
-    _createProjectPanelController.forward();
+    _finishTaskPanelController.forward();
   }
 
-  Future<void> _submitCreateProject(String name, String description) async {
-    if (name.trim().isEmpty) return;
-    try {
-      await ApiService.createProject(
-          name.trim(), description.trim(), widget.currentUser, _selectedGroupId!);
-      _projectNameController.clear();
-      _projectDescriptionController.clear();
-      _createProjectPanelController.reverse().then((_) {
-        setState(() {
-          _showCreateProjectPanel = false;
-        });
-      });
-      _fetchProjects();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Projekt '$name' erstellt.")),
-      );
-    } catch (e) {
-      debugPrint("Error creating project: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Fehler beim Erstellen des Projekts.")),
-      );
-    }
-  }
-
-  Widget _buildProjectCard(dynamic project) {
-    // Use the computed counts for open and finished tasks.
-    final String projectName = project["name"] ?? "";
-    final String description = project["description"] ?? "";
-    final int openTasks = project["open_tasks_count"] ?? 0;
-    final int finishedTasks = project["finished_tasks_count"] ?? 0;
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-      child: ListTile(
-        title: Text(
-          projectName,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildFinishTaskPanel() {
+    return Material(
+      elevation: 12,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            if (description.isNotEmpty)
-              Text(
-                description,
-                style: const TextStyle(fontSize: 14),
-              ),
-            const SizedBox(height: 4),
+            const Text("Aufgabe abschließen",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            if (_taskToFinish != null)
+              Text("Möchtest du '${_taskToFinish!.title}' als erledigt markieren?"),
+            const SizedBox(height: 16),
             Row(
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                const Icon(Icons.error_outline, size: 16),
-                const SizedBox(width: 4),
-                Text(
-                  "Offen: $openTasks",
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 14),
+                TextButton(
+                  onPressed: () => _finishTaskPanelController.reverse().then((_) {
+                    setState(() {
+                      _showFinishTaskPanel = false;
+                    });
+                  }),
+                  child: const Text("Abbrechen"),
                 ),
                 const SizedBox(width: 12),
-                const Icon(Icons.check_circle_outline, size: 16),
-                const SizedBox(width: 4),
-                Text(
-                  "Erledigt: $finishedTasks",
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 14),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (_taskToFinish != null) {
+                      await _finishTask(_taskToFinish!);
+                    }
+                    _finishTaskPanelController.reverse().then((_) {
+                      setState(() {
+                        _showFinishTaskPanel = false;
+                      });
+                    });
+                  },
+                  child: const Text("Abschließen"),
                 ),
               ],
             ),
           ],
         ),
-        trailing: const Icon(Icons.arrow_forward),
-        onTap: () {
-          // Navigate to a detailed project view if needed.
-        },
+      ),
+    );
+  }
+
+  Future<void> _finishTask(Task task) async {
+    try {
+      await ApiService.finishTask(task.id, widget.currentUser);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Aufgabe '${task.title}' erledigt.")),
+      );
+      await _fetchProjectTasks();
+    } catch (e) {
+      debugPrint("[ProjectTasksScreen] Error finishing task: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Fehler beim Abschließen der Aufgabe.")),
+      );
+    }
+  }
+
+  // ===================== JOIN TASK =====================
+  void _openJoinTaskPanel(Task task) {
+    setState(() {
+      _taskToJoin = task;
+      _showJoinTaskPanel = true;
+    });
+    _joinTaskPanelController.forward();
+  }
+
+  Widget _buildJoinTaskPanel() {
+    return Material(
+      elevation: 12,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Aufgabe übernehmen",
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            if (_taskToJoin != null)
+              Text("Möchtest du '${_taskToJoin!.title}' übernehmen?"),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => _joinTaskPanelController.reverse().then((_) {
+                    setState(() {
+                      _showJoinTaskPanel = false;
+                    });
+                  }),
+                  child: const Text("Abbrechen"),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (_taskToJoin != null) {
+                      await _joinTask(_taskToJoin!);
+                    }
+                    _joinTaskPanelController.reverse().then((_) {
+                      setState(() {
+                        _showJoinTaskPanel = false;
+                      });
+                    });
+                  },
+                  child: const Text("Übernehmen"),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _joinTask(Task task) async {
+    try {
+      await ApiService.joinTask(task.id, widget.currentUser);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Aufgabe '${task.title}' wurde dir zugewiesen.")),
+      );
+      await _fetchProjectTasks();
+    } catch (e) {
+      debugPrint("[ProjectTasksScreen] Error joining task: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Fehler beim Übernehmen der Aufgabe.")),
+      );
+    }
+  }
+
+  // ===================== DETAIL PANEL =====================
+  void _openTaskDetailPanel(Task task) {
+    setState(() {
+      _selectedTask = task;
+    });
+    _detailPanelController.forward();
+  }
+
+  Widget _buildTaskDetailPanel(Task task) {
+    final isCompleted = (task.completed == 1);
+    return Material(
+      elevation: 12,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(task.title,
+                        style: const TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold)),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () {
+                      _detailPanelController.reverse().then((_) {
+                        setState(() {
+                          _selectedTask = null;
+                        });
+                      });
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (task.assignedTo != null && task.assignedTo!.isNotEmpty)
+                Text("Zugewiesen an: ${task.assignedTo!}"),
+              if (task.creationDate != null)
+                Text("Erstellt am: ${Utils.formatDateTime(task.creationDate)}"),
+              if (task.dueDate != null)
+                Text("Fällig bis: ${Utils.formatDateTime(task.dueDate)}"),
+              const SizedBox(height: 8),
+              // Show a finish / join button if not completed:
+              if (!isCompleted)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      if (task.assignedTo == null || task.assignedTo!.isEmpty) {
+                        _openJoinTaskPanel(task);
+                      } else {
+                        _openFinishTaskPanel(task);
+                      }
+                    },
+                    child: Text(task.assignedTo == null || task.assignedTo!.isEmpty
+                        ? "Übernehmen"
+                        : "Erledigen"),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTaskTile(Task task) {
+    final isCompleted = (task.completed == 1);
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: ListTile(
+        title: Text(task.title,
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: isCompleted
+            ? const Text("Erledigt")
+            : Text("Offen" + (task.assignedTo != null ? " · ${task.assignedTo}" : "")),
+        trailing: Icon(isCompleted ? Icons.check : Icons.error_outline),
+        onTap: () => _openTaskDetailPanel(task),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final projectTitle = widget.project["name"] ?? "Unbekanntes Projekt";
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Projekte"),
+        title: Text("Projekt: $projectTitle"),
         actions: [
           IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: _openCreateProjectPanel,
+            icon: const Icon(Icons.logout),
+            onPressed: widget.onLogout,
           ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(56.0),
-          child: Container(
-            height: 56.0,
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            decoration: const BoxDecoration(
-              color: Colors.black,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black45,
-                  offset: Offset(0, 2),
-                  blurRadius: 4,
-                ),
-              ],
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                const Text(
-                  "Gruppe:",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(width: 12.0),
-                Expanded(
-                  child: _userGroups.isEmpty
-                      ? const Text("Keine Gruppe gefunden",
-                          style: TextStyle(color: Colors.white))
-                      : DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            dropdownColor: Colors.black,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                            ),
-                            value: _selectedGroupId,
-                            icon: const Icon(Icons.keyboard_arrow_down,
-                                color: Colors.white),
-                            items: _userGroups.map<DropdownMenuItem<String>>((group) {
-                              String displayText = group['name'];
-                              return DropdownMenuItem<String>(
-                                value: group['id'].toString(),
-                                child: Text(displayText,
-                                    style: const TextStyle(color: Colors.white)),
-                              );
-                            }).toList(),
-                            onChanged: (newValue) {
-                              setState(() {
-                                _selectedGroupId = newValue;
-                              });
-                              _fetchProjects();
-                            },
-                          ),
-                        ),
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
       bottomNavigationBar: CustomBottomBar(
         selectedIndex: 1,
         currentUser: widget.currentUser,
-        currentGroupId: _selectedGroupId ?? '',
+        currentGroupId: widget.groupId,
         onLogout: widget.onLogout,
       ),
       body: Stack(
         children: [
           RefreshIndicator(
-            onRefresh: _fetchProjects,
+            onRefresh: _fetchProjectTasks,
             child: ListView(
-              padding: const EdgeInsets.all(8.0),
+              padding: const EdgeInsets.all(12),
               children: [
                 if (_isLoading)
                   const Center(child: CircularProgressIndicator())
-                else if (projects.isEmpty)
-                  const Center(child: Text("Keine Projekte gefunden."))
+                else if (_projectTasks.isEmpty)
+                  const Center(child: Text("Keine Aufgaben für dieses Projekt."))
                 else
-                  ...projects.map((project) => _buildProjectCard(project)).toList(),
+                  ..._projectTasks.map(_buildTaskTile).toList(),
               ],
             ),
           ),
-          if (_showCreateProjectPanel)
+          // Slide-out detail panel
+          if (_selectedTask != null)
             Positioned(
               left: 0,
               right: 0,
               bottom: 0,
               child: SlideTransition(
-                position: _createProjectPanelSlideAnimation,
-                child: _buildCreateProjectPanel(),
+                position: _detailPanelSlideAnimation,
+                child: _buildTaskDetailPanel(_selectedTask!),
+              ),
+            ),
+          // Slide-out finish task panel
+          if (_showFinishTaskPanel)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SlideTransition(
+                position: _finishTaskPanelSlideAnimation,
+                child: _buildFinishTaskPanel(),
+              ),
+            ),
+          // Slide-out join task panel
+          if (_showJoinTaskPanel)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SlideTransition(
+                position: _joinTaskPanelSlideAnimation,
+                child: _buildJoinTaskPanel(),
               ),
             ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildCreateProjectPanel() {
-    return Material(
-      elevation: 12,
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 60,
-              height: 6,
-              decoration: BoxDecoration(
-                color: Colors.grey[400],
-                borderRadius: BorderRadius.circular(3),
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              "Projekt erstellen",
-              style: TextStyle(
-                  fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _projectNameController,
-              decoration: const InputDecoration(
-                labelText: "Projektname",
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _projectDescriptionController,
-              decoration: const InputDecoration(
-                labelText: "Beschreibung",
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: () {
-                    _createProjectPanelController.reverse().then((_) {
-                      setState(() {
-                        _showCreateProjectPanel = false;
-                      });
-                    });
-                  },
-                  child: const Text("Abbrechen"),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: () {
-                    _submitCreateProject(_projectNameController.text,
-                        _projectDescriptionController.text);
-                  },
-                  child: const Text("Erstellen"),
-                ),
-              ],
-            ),
-          ],
-        ),
       ),
     );
   }
